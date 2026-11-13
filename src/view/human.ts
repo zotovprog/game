@@ -5,7 +5,7 @@ import {
 import { damp } from '../core/rng';
 import { darkify } from './darkness';
 
-export interface HumanOpts { cloak: number; skin: number; height?: number; hood?: boolean; hunch?: number; hair?: number; bodyShadow?: boolean }
+export interface HumanOpts { cloak: number; skin: number; height?: number; hood?: boolean; hunch?: number; hair?: number; bodyShadow?: boolean; child?: boolean }
 export type Pose = 'stand' | 'sit' | 'lie';
 
 export class Human {
@@ -74,6 +74,7 @@ export class Human {
     mkLeg(this.legL, -1);
     mkLeg(this.legR, 1);
     this.root.add(this.body);
+    if (opts.child) { this.head.scale.setScalar(1.3); this.head.position.y += 0.03; }
     this.root.scale.setScalar((opts.height ?? 1.75) / 1.75);
   }
 

@@ -65,12 +65,12 @@ export class Spirit {
   face = 1;
   private holes: Mesh[] = [];
 
-  constructor(style: Style, readonly seed: number, tall = 1) {
+  constructor(style: Style, readonly seed: number, tall = 1, rimI = style.spiritRimI) {
     this.mat = new ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthWrite: false, blending: NormalBlending, side: DoubleSide,
       uniforms: {
         uTime: { value: 0 }, uSeed: { value: seed }, uAgit: { value: 0 }, uAlpha: { value: 1 }, uBurn: { value: 0 },
-        uRim: { value: new Color(style.spiritRim) }, uRimI: { value: style.spiritRimI },
+        uRim: { value: new Color(style.spiritRim) }, uRimI: { value: rimI },
       },
     });
     const body = new Mesh(geo(), this.mat);

@@ -12,7 +12,7 @@ export interface LampState {
 export const newLamp = (): LampState => ({ oil: T.lamp.startOil, wick: T.lamp.wickDefault, held: false, ember: 0, snuff: 0 });
 
 /** Расход масла в секунду. */
-export function burnRate(wick: number, companions: number): number {
+export function burnRate(wick: number, companions: number): number {   // companions — суммарная «нагрузка», может быть дробной
   const L = T.lamp;
   return (L.burnBase + Math.pow(wick, L.burnPow) * L.burnWick) * (1 + companions * L.companionBurn);
 }

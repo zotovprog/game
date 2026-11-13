@@ -1,6 +1,6 @@
 // Все числа, которые крутятся при настройке. Меняются вживую через ?debug=1.
 export const T = {
-  player: { speed: 2.9, radius: 0.32 },
+  player: { speed: 2.9, radius: 0.32, carry: 0.82, wade: 0.72 },
   lamp: {
     wickMin: 0.15, wickMax: 1, wickDefault: 0.55, wickRate: 0.7,   // доля в секунду при удержании
     radiusMin: 2.0, radiusMax: 7.2,
@@ -8,10 +8,10 @@ export const T = {
     startOil: 44, flask: 24, ownLamp: 16,
     lowOil: 14,                 // ниже — пламя чахнет независимо от фитиля
     emberRadius: 1.15, emberTime: 10,                               // масло кончилось: столько секунд до конца
-    companionBurn: 0.35, giveCost: 18, touchDrain: 9, brazierCost: 5,
+    companionBurn: 0.35, giveCost: 18, boyCost: 12, boyLoad: 0.7, familyShare: 0.34, touchDrain: 9, brazierCost: 5,
   },
   spirits: {
-    count: 4, margin: 1.1,       // держатся за границей света на таком расстоянии
+    count: 3, margin: 1.1,       // держатся за границей света на таком расстоянии
     boldRadius: 3.4,             // круг меньше — начинают заходить в свет
     boldDepth: 1.0,              // на сколько метров заходят на каждый метр ниже boldRadius
     speed: 1.5, backSpeed: 2.6,  // крадутся быстрее, когда ты к ним спиной
@@ -20,5 +20,8 @@ export const T = {
   fire: { radius: 4.6 },
   candle: { radius: 1.7 },
   wisp: { snuff: 2.7, glow: 1.5 },
+  shade: { hurtWick: 0.62, warn: 2, burn: 6.5 },   // тень терпит свет не ярче hurtWick
+  mila: { alone: 7 },                              // столько секунд ребёнок выдержит без света
+  still: { wait: 1.5, grow: 4 },                   // стоишь — тьма подползает
 };
 export type Tuning = typeof T;

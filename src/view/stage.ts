@@ -16,12 +16,12 @@ const GRADE = {
   uniforms: {
     tDiffuse: { value: null }, uTime: { value: 0 }, uRes: { value: new Vector2(1, 1) },
     uSat: { value: 1 }, uContrast: { value: 1 }, uTint: { value: new Vector3(1, 1, 1) },
-    uGrain: { value: 0.06 }, uVignette: { value: 0.5 }, uPressure: { value: 0 }, uChroma: { value: 0 }, uFade: { value: 0 },
+    uGrain: { value: 0.06 }, uVignette: { value: 0.5 }, uPressure: { value: 0 }, uChroma: { value: 0 }, uFade: { value: 0 }, uSmoke: { value: 1 },
     uCenter: { value: new Vector2(0.5, 0.5) },
   },
   vertexShader: /* glsl */ `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
   fragmentShader: /* glsl */ `
-    uniform sampler2D tDiffuse; uniform float uTime, uSat, uContrast, uGrain, uVignette, uPressure, uChroma, uFade;
+    uniform sampler2D tDiffuse; uniform float uTime, uSat, uContrast, uGrain, uVignette, uPressure, uChroma, uFade, uSmoke;
     uniform vec3 uTint; uniform vec2 uRes, uCenter; varying vec2 vUv;
     float h(vec2 p){ p = fract(p*vec2(123.34,456.21)); p += dot(p,p+45.32); return fract(p.x*p.y); }
     float n2(vec2 p){ vec2 i=floor(p), f=fract(p); vec2 u=f*f*(3.0-2.0*f);
@@ -38,6 +38,12 @@ const GRADE = {
       float r = length(a);
       float ang = atan(a.y, a.x);
       float wob = n2(vec2(ang * 2.5, uTime * 0.25)) * 0.6 + n2(vec2(ang * 7.0 + 9.0, uTime * 0.5)) * 0.4;
+      // чернота не пустая: в ней течёт едва видимый дым — к лампе, к тебе
+      float s1 = n2(vec2(ang * 2.2 + sin(r * 5.0 - uTime * 0.4) * 0.6, r * 4.5 + uTime * 0.33));
+      float s2 = n2(a * 5.0 + vec2(uTime * 0.06, -uTime * 0.045));
+      float s3 = n2(a * 11.0 - vec2(uTime * 0.11, uTime * 0.08));
+      float dark = 1.0 - smoothstep(0.0, 0.045, l);
+      col += vec3(0.055, 0.06, 0.07) * pow(s1 * s2 * 1.6, 2.2) * (0.6 + 0.8 * s3) * dark * uSmoke * (0.6 + uPressure);
       float inner = mix(0.95, 0.16, uPressure) + (wob - 0.5) * mix(0.1, 0.22, uPressure);
       float vig = smoothstep(inner, inner + mix(0.75, 0.3, uPressure), r);
       col *= 1.0 - vig * mix(uVignette, 1.0, uPressure);

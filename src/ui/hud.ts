@@ -1,6 +1,8 @@
-// Интерфейс поверх canvas: только текст. Никаких панелей — см. арт-библию.
+// Интерфейс поверх canvas: текст и явные кнопки. Палец в любом месте ведёт героя,
+// действие и выбор — кнопки, фитиль — ползунок у правого края, реплики идут сами.
 import { Input } from '../core/input';
 import { TX } from '../data/texts';
+import { faceCanvas } from '../view/faces';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, id = '', cls = ''): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag);
@@ -11,59 +13,67 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, id = '', cls = ''): H
 export interface Choice { label: string; note?: string }
 
 export class Hud {
-  readonly joy = el('div', 'joy');
-  readonly knob = el('div', 'knob');
+  readonly area = el('div', 'area');
+  readonly mark = el('div', 'mark');
   private oil = el('div', 'oil', 'fade hidden');
   private oilFill = el('i');
-  private oilWick = el('b');
   private hintEl = el('div', 'hint', 'fade hidden');
-  private promptEl = el('div', 'prompt', 'hidden');
+  private act = el('button', 'act', 'hidden');
   private dialog = el('div', 'dialog', 'hidden');
   private who = el('div', '', 'who');
   private txt = el('div', '', 'txt');
-  private more = el('div', '', 'more');
   private opts = el('div', '', 'opts');
-  private pad = el('div', 'pad');
+  private wick = el('div', 'wick', 'fade hidden');
+  private wickKnob = el('i');
   private overlay: HTMLElement | null = null;
   private hintTimer = 0;
   private queue: string[] = [];
+  private lineT = 0;
   private onDone: (() => void) | null = null;
   private onChoice: ((i: number) => void) | null = null;
   private nChoices = 0;
   private shownAt = 0;
+  private actText = '';
   input!: Input;
   onPause: (() => void) | null = null;
 
   constructor(private root: HTMLElement) {
-    this.oil.append(this.oilFill, this.oilWick);
-    this.dialog.append(this.who, this.txt, this.more, this.opts);
-    this.more.textContent = '▾';
-    const mk = (id: string, label: string) => { const b = el('button', id); b.textContent = label; this.pad.append(b); return b; };
-    const up = mk('bUp', '☀'), act = mk('bAct', '✦'), dn = mk('bDn', '☾');
+    this.oil.append(this.oilFill);
+    this.dialog.append(this.who, this.txt, this.opts);
+    const sun = el('span'); sun.textContent = '☀';
+    const moon = el('span'); moon.textContent = '☾';
+    this.wick.append(sun, this.wickKnob, moon);
     const pauseBtn = el('button', 'pauseBtn');
     pauseBtn.textContent = '‖';
+    pauseBtn.setAttribute('aria-label', TX.paused);
     pauseBtn.addEventListener('click', () => this.onPause?.());
-    root.append(this.joy, this.knob, this.oil, this.hintEl, this.promptEl, this.dialog, this.pad, pauseBtn);
-    const holdBtn = (b: HTMLElement, code: string) => {
-      b.addEventListener('pointerdown', (e) => { e.preventDefault(); this.input.hold(code, true); });
-      for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) b.addEventListener(ev, () => this.input.hold(code, false));
-    };
-    holdBtn(up, 'KeyE'); holdBtn(dn, 'KeyQ');
-    act.addEventListener('pointerdown', (e) => { e.preventDefault(); this.input.press('Space'); });
-    this.promptEl.addEventListener('pointerdown', () => this.input.press('Space'));
+    root.append(this.area, this.mark, this.oil, this.hintEl, this.wick, this.dialog, this.act, pauseBtn);
+    this.act.addEventListener('click', () => this.input.press('Space'));
     this.dialog.addEventListener('pointerdown', (e) => { if (!(e.target as HTMLElement).closest('button')) this.input.press('Space'); });
-    addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') document.body.classList.add('touch'); }, { once: false });
+    // ползунок фитиля: тянуть вверх — ярче
+    const drag = (e: PointerEvent) => {
+      const r = this.wick.getBoundingClientRect();
+      this.input.wickSet = Math.min(1, Math.max(0, 1 - (e.clientY - r.top - 26) / (r.height - 52)));
+    };
+    this.wick.addEventListener('pointerdown', (e) => { this.wick.setPointerCapture(e.pointerId); drag(e); });
+    this.wick.addEventListener('pointermove', (e) => { if (this.wick.hasPointerCapture(e.pointerId)) drag(e); });
+    addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') document.body.classList.add('touch'); });
+    if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch');
   }
 
   get touch(): boolean { return document.body.classList.contains('touch'); }
   /** Открыт ли диалог или выбор. */
   get busy(): boolean { return this.onDone !== null || this.onChoice !== null; }
 
-  showHud(on: boolean): void { this.oil.classList.toggle('hidden', !on); }
-  setOil(oil: number, wick: number, low: boolean): void {
+  showHud(on: boolean): void { this.oil.classList.toggle('hidden', !on); this.wick.classList.toggle('hidden', !on); }
+  setOil(oil: number, low: boolean): void {
     this.oilFill.style.height = `${Math.max(0, Math.min(100, oil)) * 0.96}%`;
-    this.oilWick.style.bottom = `${wick * 100}%`;
     this.oil.classList.toggle('low', low);
+  }
+  /** v — 0..1; locked — руки заняты, фитиль не тронуть. */
+  setWick(v: number, locked: boolean): void {
+    this.wickKnob.style.bottom = `calc(26px + (100% - 52px) * ${v.toFixed(3)} - 13px)`;
+    this.wick.classList.toggle('locked', locked);
   }
 
   hint(text: string, secs = 6): void {
@@ -71,20 +81,19 @@ export class Hud {
     this.hintEl.classList.remove('hidden');
     this.hintTimer = secs;
   }
+  /** Кнопка действия: видна, пока действие доступно. */
   prompt(text: string | null): void {
-    if (!text) { this.promptEl.classList.add('hidden'); return; }
-    const html = `<kbd>Пробел</kbd>${text}`;
-    if (this.promptEl.innerHTML !== html) this.promptEl.innerHTML = html;
-    this.promptEl.classList.remove('hidden');
+    if (!text) { this.act.classList.add('hidden'); this.actText = ''; return; }
+    if (this.actText !== text) { this.actText = text; this.act.innerHTML = `<kbd>Пробел</kbd>${text}`; }
+    this.act.classList.remove('hidden');
   }
 
-  /** Реплики по очереди; Пробел/тап — дальше. */
+  /** Реплики идут сами; Пробел/тап — быстрее. */
   say(name: string, lines: string[], done: () => void): void {
     this.queue = lines.slice();
     this.onDone = done;
     this.who.textContent = name;
     this.opts.replaceChildren();
-    this.more.style.display = '';
     this.dialog.classList.remove('hidden');
     this.next();
   }
@@ -97,19 +106,20 @@ export class Hud {
       return;
     }
     this.txt.textContent = line;
+    this.txt.classList.remove('in'); void this.txt.offsetWidth; this.txt.classList.add('in');
+    this.lineT = Math.min(6.5, Math.max(2.3, 1.3 + line.length * 0.055));
     this.shownAt = performance.now();
   }
 
   choose(name: string, text: string, choices: Choice[], cb: (i: number) => void): void {
     this.who.textContent = name;
     this.txt.textContent = text;
-    this.more.style.display = 'none';
     this.opts.replaceChildren();
     this.nChoices = choices.length;
     this.shownAt = performance.now();
     choices.forEach((c, i) => {
       const b = el('button');
-      b.innerHTML = `<kbd>${i + 1}</kbd>${c.label}${c.note ? `<small>${c.note}</small>` : ''}`;
+      b.innerHTML = `<kbd>${i + 1}</kbd><span>${c.label}${c.note ? `<small>${c.note}</small>` : ''}</span>`;
       b.addEventListener('click', () => this.pick(i));
       this.opts.append(b);
     });
@@ -117,7 +127,7 @@ export class Hud {
     this.dialog.classList.remove('hidden');
   }
   private pick(i: number): void {
-    if (performance.now() - this.shownAt < 350) return;
+    if (performance.now() - this.shownAt < 450) return;
     const cb = this.onChoice; this.onChoice = null;
     this.dialog.classList.add('hidden');
     this.opts.replaceChildren();
@@ -127,10 +137,18 @@ export class Hud {
   whisper(text: string, sideX = Math.random()): void {
     const w = el('div', '', 'whisper');
     w.textContent = text;
-    const left = sideX < 0.5 ? 6 + Math.random() * 22 : 62 + Math.random() * 20;
-    w.style.left = `${left}%`; w.style.top = `${18 + Math.random() * 55}%`;
+    const left = sideX < 0.5 ? 6 + Math.random() * 22 : 58 + Math.random() * 20;
+    w.style.left = `${left}%`; w.style.top = `${18 + Math.random() * 50}%`;
     this.root.append(w);
     setTimeout(() => w.remove(), 5200);
+  }
+
+  /** Скример: лицо во весь экран на долю секунды. */
+  scream(variant = Math.floor(Math.random() * 7)): void {
+    const s = el('div', '', 'scream');
+    s.style.backgroundImage = `url(${faceCanvas(variant).toDataURL()})`;
+    this.root.append(s);
+    setTimeout(() => s.remove(), 900);
   }
 
   /** Полноэкранный слой: меню, пауза, финал. */
@@ -153,8 +171,9 @@ export class Hud {
     if (opts.small) { const s = el('div', '', 'small'); s.innerHTML = opts.small; o.append(s); }
     this.root.append(o);
     this.overlay = o;
-    ps.forEach((p, i) => setTimeout(() => p.classList.add('on'), 600 + i * 2300));
-    if (btn && ps.length) setTimeout(() => { btn!.style.opacity = '1'; }, 600 + ps.length * 2300);
+    const step = ps.length > 7 ? 1500 : 2100;
+    ps.forEach((p, i) => setTimeout(() => p.classList.add('on'), 600 + i * step));
+    if (btn && ps.length) setTimeout(() => { btn!.style.opacity = '1'; }, 600 + ps.length * step);
   }
   get hasScreen(): boolean { return this.overlay !== null; }
 
@@ -163,7 +182,11 @@ export class Hud {
     const inp = this.input;
     if (this.onChoice) {
       for (let i = 0; i < this.nChoices; i++) if (inp.hit(`Digit${i + 1}`, `Numpad${i + 1}`)) { this.pick(i); break; }
-    } else if (this.onDone && inp.hit('Space', 'Enter', 'KeyF') && performance.now() - this.shownAt > 250) this.next();
+    } else if (this.onDone) {
+      this.lineT -= dt;
+      const skip = inp.hit('Space', 'Enter', 'KeyF') && performance.now() - this.shownAt > 300;
+      if (this.lineT <= 0 || skip) this.next();
+    }
   }
 
   controlsHint(): string { return this.touch ? TX.controlsTouch : TX.controlsKb; }

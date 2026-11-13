@@ -3,12 +3,16 @@
 import { Material, Vector2, Vector3, Vector4 } from 'three';
 
 export const DARK_MAX = 8;
+export const TEND_MAX = 6;
 
 export const darkU = {
   uTime: { value: 0 },
   uLights: { value: Array.from({ length: DARK_MAX }, () => new Vector4(0, 0, 0, 0)) }, // xyz + радиус
   uLightCount: { value: 0 },
   uEdgeNoise: { value: 0.55 },
+  uLobe: { value: 0.25 },                                   // насколько тьма «дышит» крупными языками
+  uLamp: { value: new Vector2() },
+  uTendrils: { value: Array.from({ length: TEND_MAX }, () => new Vector4(0, 0, 0, 0)) }, // xz кончика, ширина, сила
   uHeight: { value: new Vector2(1.4, 3.4) },
   uCutPos: { value: new Vector3() },
   uCutDir: { value: new Vector3(0, 1, 0) },
@@ -24,6 +28,8 @@ float dkFbm(vec2 p){ float s=0.0, a=0.5; for(int i=0;i<3;i++){ s+=dkNoise(p)*a; 
 
 const FRAG_HEAD = /* glsl */ `
 #define DARK_MAX ${DARK_MAX}
+#define TEND_MAX ${TEND_MAX}
+uniform float uLobe; uniform vec2 uLamp; uniform vec4 uTendrils[TEND_MAX];
 uniform float uTime; uniform vec4 uLights[DARK_MAX]; uniform int uLightCount;
 uniform float uEdgeNoise; uniform vec2 uHeight;
 uniform vec3 uCutPos; uniform vec3 uCutDir; uniform float uCutR;
@@ -39,8 +45,23 @@ vec3 darkApply(vec3 col, vec3 p){
   vec2 q = p.xz * 0.42;
   float n = dkFbm(q + vec2(uTime*0.05, -uTime*0.035));
   float n2 = dkFbm(q*2.3 - vec2(uTime*0.09, uTime*0.06) + n*1.7);
-  float edge = d + (n2 - 0.5) * uEdgeNoise * smoothstep(0.3, 1.0, d);
+  // крупные языки: тьма вдавливается в круг и отступает, как дыхание
+  vec2 rl = p.xz - uLamp;
+  float ang = atan(rl.y, rl.x);
+  float lobe = dkNoise(vec2(ang * 1.9 + uTime * 0.11, uTime * 0.23)) * 0.6 + dkNoise(vec2(ang * 4.3 - uTime * 0.17, uTime * 0.31 + 7.0)) * 0.4;
+  float edge = d + ((n2 - 0.5) * uEdgeNoise + (lobe - 0.35) * uLobe) * smoothstep(0.3, 1.0, d);
   float lit = 1.0 - smoothstep(0.7, 1.0, edge);
+  // щупальца: тьма тянется к лампе от тех, кто в ней живёт
+  for (int i = 0; i < TEND_MAX; i++) {
+    vec4 T = uTendrils[i];
+    if (T.w <= 0.001) continue;
+    vec2 dir = normalize(T.xy - uLamp + vec2(0.0001));
+    vec2 rel = p.xz - T.xy;
+    float along = dot(rel, dir);
+    float perp = along < 0.0 ? length(rel) : abs(dot(rel, vec2(-dir.y, dir.x)));
+    float wdt = T.z * (0.3 + 0.7 * smoothstep(0.0, 3.0, along)) * (0.75 + 0.6 * n2);
+    lit *= 1.0 - (1.0 - smoothstep(wdt * 0.45, wdt, perp + (n - 0.5) * 0.35)) * T.w;
+  }
   #ifndef DARK_TALL
   lit *= 1.0 - smoothstep(uHeight.x, uHeight.y, p.y);
   #endif
@@ -54,7 +75,7 @@ const CUT = /* glsl */ `
   vec3 rel = vDarkPos - uCutPos;
   float along = dot(rel, uCutDir);
   float pd = length(rel - along * uCutDir);
-  if (along > 0.45 && pd < uCutR) {
+  if (vDarkPos.y > 0.55 && along > 0.45 && pd < uCutR) {
     float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
     if (ign > smoothstep(0.5, 1.0, pd / uCutR)) discard;
   }

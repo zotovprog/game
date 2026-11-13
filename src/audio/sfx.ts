@@ -9,6 +9,8 @@ export interface AudioState {
   quiet: boolean;        // меню/пауза/финал: приглушить
 }
 
+export type Voice = 'efim' | 'vera' | 'father' | 'mother' | 'mila' | 'boy' | 'shade';
+
 export class Sfx {
   private ctx: AudioContext | null = null;
   private master!: GainNode; private lp!: BiquadFilterNode; private rev!: GainNode;
@@ -187,19 +189,69 @@ export class Sfx {
     const n = 3 + Math.floor(Math.random() * 3);
     for (let i = 0; i < n; i++) setTimeout(() => this.ctx && this.burst(this.white, 'bandpass', 1500 + Math.random() * 1600, 1300 + Math.random() * 1200, 0.1 + Math.random() * 0.12, vol * (0.5 + Math.random() * 0.5), pan, 0.5, 4), i * 150);
   }
-  /** Голос человека: низкое бормотание из нескольких слогов. */
-  voice(kind: 'efim' | 'vera'): void {
+  /** Голос человека: бормотание из нескольких слогов; у детей — выше и короче. */
+  voice(kind: Voice): void {
     if (!this.ctx) return;
-    const base = kind === 'efim' ? 98 : 196, n = 3 + Math.floor(Math.random() * 3);
+    const base = { efim: 98, vera: 196, father: 110, mother: 208, mila: 330, boy: 300, shade: 350 }[kind];
+    const form = { efim: 520, vera: 760, father: 560, mother: 800, mila: 1050, boy: 980, shade: 1150 }[kind];
+    const n = 3 + Math.floor(Math.random() * 3);
     for (let i = 0; i < n; i++) setTimeout(() => {
       if (!this.ctx) return;
       const c = this.ctx, t = this.now, f = base * (0.92 + Math.random() * 0.2), d = 0.09 + Math.random() * 0.1;
       const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.setValueAtTime(f, t); o.frequency.linearRampToValueAtTime(f * 0.9, t + d);
-      const b = c.createBiquadFilter(); b.type = 'bandpass'; b.frequency.value = kind === 'efim' ? 520 : 760; b.Q.value = 2.2;
-      const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.11, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
-      o.connect(b).connect(g); g.connect(this.master); g.connect(this.gain(0.5, this.rev));
+      const b = c.createBiquadFilter(); b.type = 'bandpass'; b.frequency.value = form; b.Q.value = 2.2;
+      const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(kind === 'shade' ? 0.07 : 0.11, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      o.connect(b).connect(g); g.connect(this.master); g.connect(this.gain(kind === 'shade' ? 1.4 : 0.5, this.rev));
       o.start(t); o.stop(t + d + 0.05);
     }, i * 120);
+  }
+  /** Голоса самой тьмы: всегда из черноты, сбоку, с долгим эхом. */
+  dark(kind: 'moan' | 'click' | 'breath' | 'knock' | 'cry' | 'scrape', pan: number, vol: number): void {
+    if (!this.ctx) return;
+    const c = this.ctx, t = this.now;
+    if (kind === 'moan') {
+      const f = 70 + Math.random() * 70, d = 1.6 + Math.random() * 1.4;
+      const o = c.createOscillator(); o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f, t); o.frequency.linearRampToValueAtTime(f * (0.8 + Math.random() * 0.5), t + d * 0.6); o.frequency.linearRampToValueAtTime(f * 0.7, t + d);
+      const b = c.createBiquadFilter(); b.type = 'bandpass'; b.Q.value = 3;
+      b.frequency.setValueAtTime(420, t); b.frequency.linearRampToValueAtTime(760, t + d * 0.5); b.frequency.linearRampToValueAtTime(300, t + d);
+      const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.085 * vol, t + d * 0.35); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      const p = c.createStereoPanner(); p.pan.value = pan;
+      o.connect(b).connect(g).connect(p); p.connect(this.master); p.connect(this.gain(1.3, this.rev));
+      o.start(t); o.stop(t + d + 0.1);
+    } else if (kind === 'breath') {
+      this.burst(this.brown, 'bandpass', 700, 380, 0.9, 0.5 * vol, pan, 0.6, 1.4);
+      setTimeout(() => this.ctx && this.burst(this.brown, 'bandpass', 420, 620, 1.1, 0.4 * vol, pan, 0.6, 1.4), 1000);
+    } else if (kind === 'click') {
+      const n = 3 + Math.floor(Math.random() * 6);
+      for (let i = 0; i < n; i++) setTimeout(() => this.ctx && this.burst(this.white, 'bandpass', 2600 + Math.random() * 1800, 2200, 0.018, 0.09 * vol, pan, 0.9, 6), i * (40 + Math.random() * 50));
+    } else if (kind === 'knock') {
+      const n = 2 + Math.floor(Math.random() * 2);
+      for (let i = 0; i < n; i++) setTimeout(() => this.ctx && this.tone('sine', 150, 70, 0.1, 0.28 * vol, pan, 1.5), i * 330);
+    } else if (kind === 'scrape') {
+      for (let i = 0; i < 7; i++) setTimeout(() => this.ctx && this.burst(this.brown, 'bandpass', 900 + Math.random() * 500, 700, 0.16, 0.22 * vol, pan, 0.8, 2.5), i * 150);
+    } else {
+      // далёкий детский плач: три коротких всхлипа
+      for (let i = 0; i < 3; i++) setTimeout(() => {
+        if (!this.ctx) return;
+        const f = 520 + Math.random() * 90;
+        this.tone('sine', f, f * 0.78, 0.34, 0.03 * vol, pan, 2.2, 0.05);
+        this.tone('triangle', f * 2, f * 1.5, 0.2, 0.008 * vol, pan, 2.2, 0.05);
+      }, i * 430 + Math.random() * 60);
+    }
+  }
+  /** Шаг по воде. */
+  splash(vol = 1): void {
+    if (!this.ctx) return;
+    this.burst(this.white, 'bandpass', 900 + Math.random() * 500, 320, 0.2, 0.09 * vol, 0, 0.6, 1.1);
+    this.burst(this.brown, 'lowpass', 420, 160, 0.14, 0.2 * vol, 0, 0.3);
+  }
+  /** Скример: визг из расстроенных пил поверх провала баса. */
+  scream(): void {
+    if (!this.ctx) return;
+    this.tone('sine', 90, 22, 1.4, 1.0, 0, 0.3);
+    for (let i = 0; i < 7; i++) { const f = 620 + i * 133 + Math.random() * 60; this.tone('sawtooth', f, f * (1.25 + Math.random() * 0.3), 0.75, 0.05, i % 2 ? 0.7 : -0.7, 0.8, 0.008); }
+    this.burst(this.white, 'bandpass', 2200, 5200, 0.6, 0.3, 0, 0.8, 0.9);
   }
   /** Тьма смыкается: всё глохнет. */
   death(): void {
