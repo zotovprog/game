@@ -22,3 +22,13 @@
 .studioigor/autopilot/runner.log
 .studioigor/autopilot/LOG.md
 # <<< studioigor:base
+
+# >>> studioigor:web
+node_modules/
+dist/
+.vite/
+coverage/
+test-results/
+playwright-report/
+*.log
+# <<< studioigor:web

@@ -12,7 +12,7 @@ the user (AskUserQuestion) + `studio.py decide --by user`. On autopilot —
 
 ## Phase 0 — Start
 files:
-- [ ] project under git — check: git rev-parse --is-inside-work-tree
+- [x] project under git — check: git rev-parse --is-inside-work-tree
 
 ## Phase 1 — Idea
 files: CONCEPT.md
@@ -25,15 +25,15 @@ files: CONCEPT.md
 
 ## Phase 2 — Style
 files: ART_BIBLE.md
-- [ ] ≥3 directions with real references shown on the board — check: manual
-- [ ] user locked the style — check: user
-- [ ] art bible: hex palette, lighting, form, ≥3 signature techniques, "forbidden" — check: manual
+- [ ] ≥3 directions with real references shown on the board — check: manual SKIP: сеть облака отклоняет Steam/Wikimedia/Openverse; направления показаны кадрами из движка (boards/style-r1, r2)
+- [x] user locked the style — check: user
+- [x] art bible: hex palette, lighting, form, ≥3 signature techniques, "forbidden" — check: manual
 
 ## Phase 3 — Platform and engine
 files: TECH.md
 - [ ] stack research done — check: test -s .studioigor/research/stack.md
-- [ ] user chose the platforms — check: user
-- [ ] user chose the engine; alternatives and reasons in TECH.md — check: user
+- [x] user chose the platforms — check: user
+- [x] user chose the engine; alternatives and reasons in TECH.md — check: user
 
 ## Phase 4 — Environment
 files: ENV.md

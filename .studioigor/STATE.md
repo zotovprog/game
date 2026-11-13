@@ -1,7 +1,7 @@
 # studioigor — Пещера помнит
 
 PROJECT: Пещера помнит
-PHASE: 0 — Start
+PHASE: 2 — Style
 UPDATED: 2026-11-13 10:59
 
 ## Now
