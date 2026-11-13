@@ -4,3 +4,4 @@ The user's choices for this game, in their own words (learn.py prefer). They bea
 ones in <skill>/user-choices/ and don't carry over to other games.
 
 - (2026-11-13, P2) призраки почти невидимы: никаких контуров и свечения
+- (2026-11-13, P6) реплики диалога идут сами, без тапа; действия и выбор — явные кнопки на экране
