@@ -31,7 +31,7 @@ files: ART_BIBLE.md
 
 ## Phase 3 — Platform and engine
 files: TECH.md
-- [ ] stack research done — check: test -s .studioigor/research/stack.md
+- [x] stack research done — check: test -s .studioigor/research/stack.md
 - [x] user chose the platforms — check: user
 - [x] user chose the engine; alternatives and reasons in TECH.md — check: user
 

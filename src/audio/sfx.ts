@@ -1,0 +1,225 @@
+// Весь звук синтезируется на лету (WebAudio): гул пещеры, шёпот, сердце, шаги, капли, огонь, удары.
+export interface AudioState {
+  pressure: number;      // 0..1 — насколько тьма сжала круг
+  power: number;         // 0..1 — сила пламени
+  near: number;          // 0..1 — близость духов
+  pan: number;           // -1..1 — с какой стороны ближайший
+  fire: number;          // 0..1 — близость живого огня
+  dawn: number;          // 0..1 — близость Врат
+  quiet: boolean;        // меню/пауза/финал: приглушить
+}
+
+export class Sfx {
+  private ctx: AudioContext | null = null;
+  private master!: GainNode; private lp!: BiquadFilterNode; private rev!: GainNode;
+  private white!: AudioBuffer; private brown!: AudioBuffer;
+  private droneG!: GainNode; private dreadG!: GainNode; private airG!: GainNode; private airF!: BiquadFilterNode;
+  private whG!: GainNode; private whPan!: StereoPannerNode; private hissG!: GainNode; private fireG!: GainNode; private dawnG!: GainNode;
+  private tWh = 0; private tBeat = 0; private tDrip = 2; private tSputter = 0; private tFire = 0;
+  private stepFlip = false;
+
+  get ready(): boolean { return this.ctx !== null; }
+  private get now(): number { return this.ctx!.currentTime; }
+
+  /** Вызывать из обработчика клика: браузер разрешает звук только после жеста. */
+  init(): void {
+    if (this.ctx) { void this.ctx.resume(); return; }
+    const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AC) return;
+    const c = (this.ctx = new AC());
+    this.white = this.noise(2, false); this.brown = this.noise(3, true);
+    const comp = c.createDynamicsCompressor();
+    comp.threshold.value = -16; comp.ratio.value = 5;
+    this.lp = c.createBiquadFilter(); this.lp.type = 'lowpass'; this.lp.frequency.value = 18000;
+    this.master = c.createGain(); this.master.gain.value = 0;
+    this.master.connect(this.lp).connect(comp).connect(c.destination);
+    const conv = c.createConvolver(); conv.buffer = this.impulse(3.4);
+    this.rev = c.createGain(); this.rev.gain.value = 0.55;
+    this.rev.connect(conv).connect(this.master);
+
+    // гул: два почти одинаковых тона дают медленное биение
+    this.droneG = this.gain(0.0, this.master);
+    for (const [f, type, g] of [[41, 'sine', 1], [43.4, 'sine', 0.8], [82.6, 'triangle', 0.16], [123.2, 'sine', 0.07]] as [number, OscillatorType, number][]) {
+      const o = c.createOscillator(); o.type = type; o.frequency.value = f;
+      o.connect(this.gain(g, this.droneG)); o.start();
+    }
+    // тревога: тесный кластер, слышен только когда свет мал
+    this.dreadG = this.gain(0, this.master);
+    const dl = c.createBiquadFilter(); dl.type = 'lowpass'; dl.frequency.value = 520; dl.connect(this.dreadG); dl.connect(this.gain(0.5, this.rev));
+    for (const f of [233.1, 246.9, 261.6, 349.2]) { const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.detune.value = Math.random() * 30 - 15; o.connect(this.gain(0.25, dl)); o.start(); }
+    // воздух
+    this.airG = this.gain(0.0, this.master);
+    this.airF = c.createBiquadFilter(); this.airF.type = 'bandpass'; this.airF.frequency.value = 240; this.airF.Q.value = 0.6;
+    this.loop(this.brown).connect(this.airF).connect(this.airG);
+    // шёпот: шум сквозь «гласные» форманты, громкость рубится на слоги
+    this.whG = this.gain(0, null);
+    this.whPan = c.createStereoPanner();
+    this.whG.connect(this.whPan); this.whPan.connect(this.master); this.whPan.connect(this.gain(0.6, this.rev));
+    const src = this.loop(this.white);
+    for (const [f, q] of [[1750, 5], [2900, 6], [900, 3]]) { const b = c.createBiquadFilter(); b.type = 'bandpass'; b.frequency.value = f; b.Q.value = q; src.connect(b).connect(this.whG); }
+    // шипение фитиля
+    this.hissG = this.gain(0, this.master);
+    const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 5200;
+    this.loop(this.white).connect(hp).connect(this.hissG);
+    // треск живого огня
+    this.fireG = this.gain(0, this.master);
+    const fb = c.createBiquadFilter(); fb.type = 'bandpass'; fb.frequency.value = 1500; fb.Q.value = 0.7;
+    this.loop(this.brown).connect(fb).connect(this.fireG);
+    // рассвет за Вратами: тёплое трезвучие
+    this.dawnG = this.gain(0, this.master);
+    this.dawnG.connect(this.gain(0.8, this.rev));
+    for (const f of [110, 164.8, 220, 277.2, 329.6]) { const o = c.createOscillator(); o.type = 'sine'; o.frequency.value = f; o.connect(this.gain(f < 200 ? 0.5 : 0.25, this.dawnG)); o.start(); }
+    this.master.gain.setTargetAtTime(0.85, c.currentTime, 1.5);
+  }
+
+  private gain(v: number, to: AudioNode | null): GainNode { const g = this.ctx!.createGain(); g.gain.value = v; if (to) g.connect(to); return g; }
+  private loop(buf: AudioBuffer): AudioBufferSourceNode { const s = this.ctx!.createBufferSource(); s.buffer = buf; s.loop = true; s.start(0, Math.random() * buf.duration); return s; }
+  private noise(sec: number, brown: boolean): AudioBuffer {
+    const c = this.ctx!, b = c.createBuffer(1, c.sampleRate * sec, c.sampleRate), d = b.getChannelData(0);
+    let last = 0;
+    for (let i = 0; i < d.length; i++) { const w = Math.random() * 2 - 1; if (brown) { last = (last + 0.02 * w) / 1.02; d[i] = last * 3.5; } else d[i] = w; }
+    return b;
+  }
+  private impulse(sec: number): AudioBuffer {
+    const c = this.ctx!, b = c.createBuffer(2, c.sampleRate * sec, c.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = b.getChannelData(ch); let lpv = 0;
+      for (let i = 0; i < d.length; i++) {
+        const t = i / d.length;
+        lpv += ((Math.random() * 2 - 1) - lpv) * (0.5 - 0.42 * t);            // хвост темнее начала
+        d[i] = lpv * Math.pow(1 - t, 2.6) * (i < 400 ? i / 400 : 1);
+      }
+    }
+    return b;
+  }
+  /** Короткий шумовой звук с фильтром и огибающей. */
+  private burst(buf: AudioBuffer, type: BiquadFilterType, f0: number, f1: number, dur: number, vol: number, pan = 0, wet = 0.3, q = 1): void {
+    const c = this.ctx!, t = this.now;
+    const s = c.createBufferSource(); s.buffer = buf; s.loop = true;
+    const f = c.createBiquadFilter(); f.type = type; f.Q.value = q;
+    f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+    const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + Math.min(0.02, dur * 0.2)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const p = c.createStereoPanner(); p.pan.value = pan;
+    s.connect(f).connect(g).connect(p); p.connect(this.master); if (wet > 0) p.connect(this.gain(wet, this.rev));
+    s.start(t, Math.random() * buf.duration); s.stop(t + dur + 0.05);
+  }
+  private tone(type: OscillatorType, f0: number, f1: number, dur: number, vol: number, pan = 0, wet = 0.3, attack = 0.005): void {
+    const c = this.ctx!, t = this.now;
+    const o = c.createOscillator(); o.type = type;
+    o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(10, f1), t + dur);
+    const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const p = c.createStereoPanner(); p.pan.value = pan;
+    o.connect(g).connect(p); p.connect(this.master); if (wet > 0) p.connect(this.gain(wet, this.rev));
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+
+  update(dt: number, s: AudioState): void {
+    if (!this.ctx) return;
+    const t = this.now, k = 0.25;
+    const q = s.quiet ? 0.35 : 1;
+    this.droneG.gain.setTargetAtTime((0.1 + 0.16 * s.pressure) * q, t, k);
+    this.dreadG.gain.setTargetAtTime(Math.pow(Math.max(s.pressure, s.near * 0.8), 2) * 0.05 * q, t, 0.6);
+    this.airG.gain.setTargetAtTime((0.05 + 0.05 * s.pressure) * q, t, k);
+    this.airF.frequency.setTargetAtTime(220 + 160 * Math.sin(t * 0.13) + 200 * s.pressure, t, 1);
+    this.hissG.gain.setTargetAtTime(0.0035 * s.power * q, t, k);
+    this.fireG.gain.setTargetAtTime(0.11 * s.fire * q, t, 0.4);
+    this.dawnG.gain.setTargetAtTime(0.05 * s.dawn, t, 1.2);
+    this.whPan.pan.setTargetAtTime(Math.max(-1, Math.min(1, s.pan)), t, 0.3);
+    // слоги шёпота
+    this.tWh -= dt;
+    if (this.tWh <= 0) {
+      this.tWh = 0.07 + Math.random() * 0.16;
+      const lvl = s.quiet ? 0 : Math.pow(Math.max(s.near, s.pressure * 0.7), 1.6) * 0.085;
+      this.whG.gain.setTargetAtTime(Math.random() < 0.3 ? 0 : lvl * (0.3 + Math.random()), t, 0.03);
+    }
+    // треск огня — случайные всплески
+    this.tFire -= dt;
+    if (this.tFire <= 0 && s.fire > 0.05 && !s.quiet) { this.tFire = 0.05 + Math.random() * 0.3; this.burst(this.white, 'bandpass', 2000 + Math.random() * 3000, 1500, 0.03, 0.05 * s.fire, 0, 0.1, 2); }
+    // сердце
+    if (s.pressure > 0.4 && !s.quiet) {
+      this.tBeat -= dt;
+      if (this.tBeat <= 0) {
+        this.tBeat = 1.15 - 0.72 * Math.pow((s.pressure - 0.4) / 0.6, 1.3);
+        const v = 0.25 + 0.5 * s.pressure;
+        this.tone('sine', 62, 36, 0.16, v, 0, 0.05);
+        setTimeout(() => this.ctx && this.tone('sine', 54, 32, 0.14, v * 0.7, 0, 0.05), 150);
+        this.beat = 1;
+      }
+    }
+    this.beat = Math.max(0, this.beat - dt * 3.5);
+    // капли
+    this.tDrip -= dt;
+    if (this.tDrip <= 0 && !s.quiet) { this.tDrip = 2.5 + Math.random() * 7; const f = 1100 + Math.random() * 1200; this.tone('sine', f, f * 0.55, 0.07, 0.035, Math.random() * 1.6 - 0.8, 1.2); }
+    // чихание пламени на остатках масла
+    this.tSputter -= dt;
+    if (this.tSputter <= 0 && s.power < 0.22 && s.power > 0 && !s.quiet) { this.tSputter = 0.1 + Math.random() * 0.7; this.burst(this.white, 'highpass', 3000, 2500, 0.025, 0.03, 0, 0); }
+  }
+  /** 0..1 — затухающий импульс удара сердца (для виньетки). */
+  beat = 0;
+
+  step(vol = 1): void {
+    if (!this.ctx) return;
+    this.stepFlip = !this.stepFlip;
+    const f = this.stepFlip ? 620 : 500;
+    this.burst(this.brown, 'lowpass', f + Math.random() * 200, 200, 0.09, 0.2 * vol, 0, 0.35);
+    this.burst(this.white, 'bandpass', 2400 + Math.random() * 800, 1800, 0.035, 0.012 * vol, 0, 0.2, 1.5);
+  }
+  pickup(): void {
+    if (!this.ctx) return;
+    this.tone('sine', 2350, 2300, 0.3, 0.05, 0.1, 0.5); this.tone('sine', 3520, 3480, 0.22, 0.03, -0.1, 0.5);
+    setTimeout(() => this.ctx && this.burst(this.brown, 'lowpass', 500, 180, 0.35, 0.3, 0, 0.2), 120);
+  }
+  ignite(): void { if (this.ctx) { this.burst(this.brown, 'bandpass', 180, 1400, 0.7, 0.5, 0, 0.5, 0.8); this.burst(this.white, 'highpass', 2500, 5000, 0.25, 0.05); } }
+  relight(): void { if (this.ctx) { this.burst(this.white, 'bandpass', 400, 2600, 0.35, 0.16, 0, 0.4, 0.9); } }
+  snuff(pan = 0): void { if (this.ctx) this.burst(this.white, 'highpass', 6000, 700, 0.45, 0.12, pan, 0.8); }
+  gust(): void { if (this.ctx) { this.burst(this.brown, 'bandpass', 160, 900, 1.1, 0.9, -0.5, 0.6, 0.7); setTimeout(() => this.ctx && this.burst(this.brown, 'bandpass', 800, 150, 1.6, 0.7, 0.5, 0.6, 0.7), 500); } }
+  touch(): void { if (this.ctx) { this.tone('sine', 90, 30, 0.5, 0.6, 0, 0.3); this.burst(this.white, 'bandpass', 900, 3200, 0.3, 0.14, 0, 0.6, 3); } }
+  /** Резкий удар: провал баса + расстроенный кластер. */
+  stinger(): void {
+    if (!this.ctx) return;
+    this.tone('sine', 70, 24, 1.6, 0.9, 0, 0.4);
+    for (let i = 0; i < 6; i++) this.tone('sawtooth', 380 + i * 97 + Math.random() * 40, 300 + i * 60, 1.1, 0.035, i % 2 ? 0.6 : -0.6, 0.9, 0.01);
+    this.burst(this.white, 'bandpass', 3500, 600, 0.9, 0.2, 0, 0.9, 1.2);
+  }
+  /** Шёпот в самое ухо. */
+  whisper(pan: number, vol = 0.12): void {
+    if (!this.ctx) return;
+    const n = 3 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < n; i++) setTimeout(() => this.ctx && this.burst(this.white, 'bandpass', 1500 + Math.random() * 1600, 1300 + Math.random() * 1200, 0.1 + Math.random() * 0.12, vol * (0.5 + Math.random() * 0.5), pan, 0.5, 4), i * 150);
+  }
+  /** Голос человека: низкое бормотание из нескольких слогов. */
+  voice(kind: 'efim' | 'vera'): void {
+    if (!this.ctx) return;
+    const base = kind === 'efim' ? 98 : 196, n = 3 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < n; i++) setTimeout(() => {
+      if (!this.ctx) return;
+      const c = this.ctx, t = this.now, f = base * (0.92 + Math.random() * 0.2), d = 0.09 + Math.random() * 0.1;
+      const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.setValueAtTime(f, t); o.frequency.linearRampToValueAtTime(f * 0.9, t + d);
+      const b = c.createBiquadFilter(); b.type = 'bandpass'; b.frequency.value = kind === 'efim' ? 520 : 760; b.Q.value = 2.2;
+      const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.11, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      o.connect(b).connect(g); g.connect(this.master); g.connect(this.gain(0.5, this.rev));
+      o.start(t); o.stop(t + d + 0.05);
+    }, i * 120);
+  }
+  /** Тьма смыкается: всё глохнет. */
+  death(): void {
+    if (!this.ctx) return;
+    this.tone('sine', 110, 20, 3.5, 0.9, 0, 0.2);
+    this.lp.frequency.setTargetAtTime(90, this.now, 0.9);
+  }
+  /** Вернуть слух после смерти/финала. */
+  restore(): void { if (this.ctx) this.lp.frequency.setTargetAtTime(18000, this.now, 0.4); }
+  /** Финальный аккорд. */
+  chord(kind: 'alone' | 'together' | 'beacon'): void {
+    if (!this.ctx) return;
+    const notes = kind === 'together' ? [110, 164.8, 220, 277.2, 329.6, 440] : kind === 'beacon' ? [110, 164.8, 246.9, 329.6] : [103.8, 155.6, 207.7, 246.9];
+    const c = this.ctx, t = this.now;
+    notes.forEach((f, i) => {
+      const o = c.createOscillator(); o.type = i % 2 ? 'triangle' : 'sine'; o.frequency.value = f;
+      const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.07, t + 3 + i * 0.4); g.gain.setTargetAtTime(0.0001, t + 14, 4);
+      o.connect(g); g.connect(this.master); g.connect(this.gain(0.9, this.rev));
+      o.start(t); o.stop(t + 40);
+    });
+  }
+  suspend(on: boolean): void { if (!this.ctx) return; if (on) void this.ctx.suspend(); else void this.ctx.resume(); }
+}

@@ -48,6 +48,17 @@ export class Grid {
     return best;
   }
 
+  /** Ближайшая точка пола с запасом от стен — чтобы ничего не оказалось в камне. */
+  snap(x: number, z: number, clear = 0.7): [number, number] {
+    if (this.isFloor(x, z) && this.wallDist(x, z) >= clear) return [x, z];
+    let best: [number, number] = [x, z], bd = 1e9;
+    for (let dz = -6; dz <= 6; dz += 0.5) for (let dx = -6; dx <= 6; dx += 0.5) {
+      const nx = x + dx, nz = z + dz, d = dx * dx + dz * dz;
+      if (d < bd && this.isFloor(nx, nz) && this.wallDist(nx, nz) >= clear) { bd = d; best = [nx, nz]; }
+    }
+    return best;
+  }
+
   /** Выталкивает круг из стен и препятствий. Меняет p на месте. */
   collide(p: { x: number; z: number }, radius: number): void {
     for (let iter = 0; iter < 2; iter++) {

@@ -1,7 +1,8 @@
 // Дух: высокая фигура из дыма. В темноте виден только холодный контур и бледное лицо.
 import {
-  Color, Group, LatheGeometry, Mesh, MeshBasicMaterial, ShaderMaterial, SphereGeometry, Vector2, NormalBlending, DoubleSide,
+  Color, Group, LatheGeometry, Mesh, MeshBasicMaterial, ShaderMaterial, SphereGeometry, Sprite, SpriteMaterial, Vector2, NormalBlending, DoubleSide,
 } from 'three';
+import { makeGlow } from './glow';
 import { Style } from '../data/styles';
 
 const VERT = /* glsl */ `
@@ -31,7 +32,7 @@ void main(){
   float body = 0.7 * foot * (0.65 + 0.35*smoke);
   float burn = smoothstep(1.0 - uBurn*1.3, 1.3 - uBurn*1.3, smoke + (1.0 - foot)*0.3); // свет выжигает дыры
   float alpha = clamp(body + rim*0.5, 0.0, 1.0) * uAlpha * (1.0 - burn);
-  vec3 col = uRim * (rim * uRimI * (0.6 + 0.8*smoke)) + uRim * 0.012;
+  vec3 col = uRim * (rim * uRimI * (0.6 + 0.8*smoke));
   col += vec3(1.0, 0.45, 0.12) * burn * (1.0 - burn) * 3.0 * uBurn;   // тлеющая кромка
   if (alpha < 0.01) discard;
   gl_FragColor = vec4(col, alpha);
@@ -52,7 +53,7 @@ const faceGeo = new SphereGeometry(1, 10, 8);
 export class Spirit {
   readonly group = new Group();
   private mat: ShaderMaterial;
-  private faceMat: MeshBasicMaterial;
+  private face3: Sprite;
   private faceColor: Color;
   private arms: Mesh[] = [];
   /** 0..1: насколько дух проявлен */
@@ -60,6 +61,9 @@ export class Spirit {
   /** 0..1: как сильно его жжёт свет */
   burn = 0;
   agitation = 0;
+  /** 0..1: насколько проступило лицо */
+  face = 1;
+  private holes: Mesh[] = [];
 
   constructor(style: Style, readonly seed: number, tall = 1) {
     this.mat = new ShaderMaterial({
@@ -82,29 +86,30 @@ export class Spirit {
       this.group.add(arm);
     }
     this.faceColor = new Color(style.spiritFace);
-    this.faceMat = new MeshBasicMaterial({ color: this.faceColor.clone(), transparent: true, depthWrite: false });
-    const face = new Mesh(faceGeo, this.faceMat);
-    face.scale.set(0.12, 0.17, 0.05);
-    face.position.set(0, 2.42 * tall, 0.15);
-    face.renderOrder = 6;
+    this.face3 = makeGlow(style.spiritFace, 1, 1);
+    this.face3.scale.set(0.34, 0.5, 1);
+    this.face3.position.set(0, 2.42 * tall, 0.16);
+    this.face3.renderOrder = 6;
+    this.group.add(this.face3);
     const hole = new MeshBasicMaterial({ color: 0x000000 });
-    const mk = (x: number, y: number, sx: number, sy: number) => {
+    for (const x of [-0.045, 0.045]) {
       const e = new Mesh(faceGeo, hole);
-      e.scale.set(sx, sy, 0.02);
-      e.position.set(x, 2.42 * tall + y, 0.2);
+      e.scale.set(0.02, 0.03, 0.02);
+      e.position.set(x, 2.45 * tall, 0.22);
       e.renderOrder = 7;
+      this.holes.push(e);
       this.group.add(e);
-    };
-    mk(-0.05, 0.035, 0.028, 0.04); mk(0.05, 0.035, 0.028, 0.04); mk(0, -0.075, 0.03, 0.055);
-    this.group.add(face);
+    }
   }
 
   update(t: number): void {
     const u = this.mat.uniforms;
     u.uTime.value = t; u.uAlpha.value = this.alpha; u.uBurn.value = this.burn; u.uAgit.value = this.agitation;
-    const f = this.alpha * (1 - this.burn) * (0.38 + 0.1 * Math.sin(t * 2.3 + this.seed * 9));
-    this.faceMat.color.copy(this.faceColor).multiplyScalar(f);
-    this.faceMat.opacity = this.alpha * (1 - this.burn);
+    const vis = this.alpha * (1 - this.burn) * this.face;
+    const f = vis * (0.2 + 0.05 * Math.sin(t * 2.3 + this.seed * 9));
+    (this.face3.material as SpriteMaterial).color.copy(this.faceColor).multiplyScalar(f);
+    this.holes.forEach((h) => { h.visible = vis > 0.55; });
+    this.group.visible = this.alpha > 0.01;
     this.arms[0].rotation.z = 0.06 + Math.sin(t * 0.9 + this.seed) * 0.05;
     this.arms[1].rotation.z = -0.06 - Math.sin(t * 0.8 + this.seed * 2) * 0.05;
   }

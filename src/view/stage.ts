@@ -1,6 +1,6 @@
 // Сцена, изометрическая камера, постобработка. Один на всё приложение.
 import {
-  ACESFilmicToneMapping, Color, HemisphereLight, OrthographicCamera, PCFSoftShadowMap, Scene, ShaderMaterial, Vector2,
+  ACESFilmicToneMapping, Color, OrthographicCamera, PCFSoftShadowMap, Scene, ShaderMaterial, Vector2,
   Vector3, WebGLRenderer,
 } from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -15,13 +15,13 @@ import { darkU } from './darkness';
 const GRADE = {
   uniforms: {
     tDiffuse: { value: null }, uTime: { value: 0 }, uRes: { value: new Vector2(1, 1) },
-    uSat: { value: 1 }, uContrast: { value: 1 }, uTint: { value: new Vector3(1, 1, 1) }, uPoster: { value: 0 },
+    uSat: { value: 1 }, uContrast: { value: 1 }, uTint: { value: new Vector3(1, 1, 1) },
     uGrain: { value: 0.06 }, uVignette: { value: 0.5 }, uPressure: { value: 0 }, uChroma: { value: 0 }, uFade: { value: 0 },
     uCenter: { value: new Vector2(0.5, 0.5) },
   },
   vertexShader: /* glsl */ `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
   fragmentShader: /* glsl */ `
-    uniform sampler2D tDiffuse; uniform float uTime, uSat, uContrast, uPoster, uGrain, uVignette, uPressure, uChroma, uFade;
+    uniform sampler2D tDiffuse; uniform float uTime, uSat, uContrast, uGrain, uVignette, uPressure, uChroma, uFade;
     uniform vec3 uTint; uniform vec2 uRes, uCenter; varying vec2 vUv;
     float h(vec2 p){ p = fract(p*vec2(123.34,456.21)); p += dot(p,p+45.32); return fract(p.x*p.y); }
     float n2(vec2 p){ vec2 i=floor(p), f=fract(p); vec2 u=f*f*(3.0-2.0*f);
@@ -33,10 +33,6 @@ const GRADE = {
       float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
       col = mix(vec3(l), col, uSat) * uTint;
       col = max((col - 0.18) * uContrast + 0.18, 0.0);
-      if (uPoster > 0.5) {
-        float d = h(gl_FragCoord.xy + 3.7) - 0.5;
-        col = floor(col * uPoster + 0.5 + d * 0.9) / uPoster;
-      }
       // давление: тьма наползает с краёв кадра к лампе, край рваный и шевелится
       vec2 a = (uv - uCenter) * vec2(uRes.x / uRes.y, 1.0);
       float r = length(a);
@@ -59,7 +55,6 @@ export class Stage {
   readonly composer: EffectComposer;
   readonly grade: ShaderMaterial;
   readonly bloom: UnrealBloomPass;
-  readonly hemi: HemisphereLight;
   /** высота видимой области в метрах */
   viewH = 14.5;
   viewHTarget = 14.5;
@@ -89,9 +84,6 @@ export class Stage {
     this.right.set(Math.cos(yaw), 0, -Math.sin(yaw));
     this.up.set(-Math.sin(yaw), 0, -Math.cos(yaw));
 
-    this.hemi = new HemisphereLight(style.ambient, 0x000000, style.ambientI);
-    this.scene.add(this.hemi);
-
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.bloom = new UnrealBloomPass(new Vector2(256, 256), style.bloom, 0.75, 0.9);
@@ -109,10 +101,9 @@ export class Stage {
     this.style = s;
     const u = this.grade.uniforms;
     u.uSat.value = s.sat; u.uContrast.value = s.contrast; (u.uTint.value as Vector3).set(...s.tint);
-    u.uPoster.value = s.poster; u.uGrain.value = s.grain; u.uVignette.value = s.vignette;
+    u.uGrain.value = s.grain; u.uVignette.value = s.vignette;
     this.bloom.strength = s.bloom;
-    this.hemi.color.set(s.ambient); this.hemi.intensity = s.ambientI;
-    darkU.uDarkTint.value.set(s.darkTint); darkU.uVeins.value = s.veins; darkU.uEdgeNoise.value = s.edgeNoise;
+    darkU.uEdgeNoise.value = s.edgeNoise;
   }
 
   resize(): void {

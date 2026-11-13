@@ -1,6 +1,6 @@
 // «Живая тьма»: вшивается в материалы мира. Всё, до чего не дотягивается ни один источник
 // света, уходит в чёрное; граница изъедена шумом, который ползёт внутрь круга.
-import { Color, Material, Vector2, Vector3, Vector4 } from 'three';
+import { Material, Vector2, Vector3, Vector4 } from 'three';
 
 export const DARK_MAX = 8;
 
@@ -8,8 +8,6 @@ export const darkU = {
   uTime: { value: 0 },
   uLights: { value: Array.from({ length: DARK_MAX }, () => new Vector4(0, 0, 0, 0)) }, // xyz + радиус
   uLightCount: { value: 0 },
-  uDarkTint: { value: new Color(0x000000) },
-  uVeins: { value: 0 },
   uEdgeNoise: { value: 0.55 },
   uHeight: { value: new Vector2(1.4, 3.4) },
   uCutPos: { value: new Vector3() },
@@ -27,7 +25,7 @@ float dkFbm(vec2 p){ float s=0.0, a=0.5; for(int i=0;i<3;i++){ s+=dkNoise(p)*a; 
 const FRAG_HEAD = /* glsl */ `
 #define DARK_MAX ${DARK_MAX}
 uniform float uTime; uniform vec4 uLights[DARK_MAX]; uniform int uLightCount;
-uniform vec3 uDarkTint; uniform float uVeins; uniform float uEdgeNoise; uniform vec2 uHeight;
+uniform float uEdgeNoise; uniform vec2 uHeight;
 uniform vec3 uCutPos; uniform vec3 uCutDir; uniform float uCutR;
 varying vec3 vDarkPos;
 ${NOISE}
@@ -43,9 +41,10 @@ vec3 darkApply(vec3 col, vec3 p){
   float n2 = dkFbm(q*2.3 - vec2(uTime*0.09, uTime*0.06) + n*1.7);
   float edge = d + (n2 - 0.5) * uEdgeNoise * smoothstep(0.3, 1.0, d);
   float lit = 1.0 - smoothstep(0.7, 1.0, edge);
+  #ifndef DARK_TALL
   lit *= 1.0 - smoothstep(uHeight.x, uHeight.y, p.y);
-  float vein = pow(n2, 2.2) * 4.0 * uVeins * (1.0 - lit) * exp(-max(d - 1.0, 0.0) * 0.55);
-  return col * lit + uDarkTint * vein * 0.6;
+  #endif
+  return col * lit;
 }
 `;
 
@@ -64,7 +63,7 @@ const CUT = /* glsl */ `
 `;
 
 /** Подключает тьму к стандартному материалу. cut — вырез вокруг героя (для стен). */
-export function darkify<T extends Material>(mat: T, cut = false): T {
+export function darkify<T extends Material>(mat: T, cut = false, tall = false): T {
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, darkU);
     shader.vertexShader = shader.vertexShader
@@ -79,11 +78,11 @@ export function darkify<T extends Material>(mat: T, cut = false): T {
         vDarkPos = (modelMatrix * dkP).xyz;`,
       );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${cut ? '#define DARK_CUT\n' : ''}${FRAG_HEAD}`)
+      .replace('#include <common>', `#include <common>\n${cut ? '#define DARK_CUT\n' : ''}${tall ? '#define DARK_TALL\n' : ''}${FRAG_HEAD}`)
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\n${CUT}`)
       .replace('#include <dithering_fragment>', 'gl_FragColor.rgb = darkApply(gl_FragColor.rgb, vDarkPos);\n#include <dithering_fragment>');
   };
-  mat.customProgramCacheKey = () => (cut ? 'dark-cut' : 'dark');
+  mat.customProgramCacheKey = () => `dark${cut ? '-cut' : ''}${tall ? '-tall' : ''}`;
   return mat;
 }
 

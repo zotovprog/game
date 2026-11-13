@@ -10,7 +10,7 @@ import { darkify } from './darkness';
 
 const CHUNK = 12;
 
-function roughen(geo: BufferGeometry, amp: number, seed: number): BufferGeometry {
+export function roughen(geo: BufferGeometry, amp: number, seed: number): BufferGeometry {
   const pos = geo.getAttribute('position') as BufferAttribute;
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);

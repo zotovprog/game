@@ -43,7 +43,7 @@ export class Lantern {
     this.flame.position.y = 0.085;
     this.glow = makeGlow(style.lamp, 0.9, 1.0);
     this.glow.position.y = 0.1;
-    this.halo = makeGlow(style.lamp, 5, 0.1);
+    this.halo = makeGlow(style.lamp, 5, 0.05);
     this.halo.position.y = 0.1;
     this.group.add(this.glass, this.flame, this.glow, this.halo);
 
@@ -64,13 +64,13 @@ export class Lantern {
     const unstable = power < 0.35 ? (0.35 - power) * 2.2 : 0;            // слабое пламя дрожит сильнее
     this.flicker = 1 - (0.1 + unstable * 0.5) * n;
     const p = power * this.flicker;
-    this.light.intensity = (7 + 46 * p) * gain * (power > 0.001 ? 1 : 0);
+    this.light.intensity = (3.5 + 25 * p) * gain * (power > 0.001 ? 1 : 0);
     this.light.distance = Math.max(1.5, radius * 1.55);
     const fc = (this.flame.material as MeshBasicMaterial).color;
-    fc.copy(this.flameColor).lerp(new Color(0xffffff), 0.35).multiplyScalar(1.2 + 5 * p);
+    fc.copy(this.flameColor).lerp(new Color(0xffffff), 0.35).multiplyScalar(1.2 + 3.5 * p);
     this.flame.scale.set(1, 0.8 + 1.4 * p + n * 0.25, 1);
-    (this.glow.material as { opacity: number }).opacity = 0.25 + 0.75 * p;
-    this.glow.scale.setScalar(0.35 + 0.9 * p);
+    (this.glow.material as { opacity: number }).opacity = 0.2 + 0.4 * p;
+    this.glow.scale.setScalar(0.25 + 0.4 * p);
     (this.halo.material as { opacity: number }).opacity = p;
     this.halo.scale.setScalar(Math.max(0.5, radius * 1.1));
     (this.glass.material as MeshBasicMaterial).opacity = 0.15 + 0.3 * p;

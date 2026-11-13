@@ -21,6 +21,7 @@ export class Human {
   private walk = 0;                  // сглаженная доля ходьбы 0..1
   private pose: Pose = 'stand';
   private poseK = 0;                 // 0 — стоит, 1 — сидит
+  private lieK = 0;                  // 1 — лежит на спине
   private hunch: number;
   carrying = false;
 
@@ -76,14 +77,21 @@ export class Human {
     this.root.scale.setScalar((opts.height ?? 1.75) / 1.75);
   }
 
-  setPose(p: Pose, instant = false): void { this.pose = p; if (instant) this.poseK = p === 'stand' ? 0 : 1; }
+  setPose(p: Pose, instant = false): void {
+    this.pose = p;
+    if (instant) { this.poseK = p === 'sit' ? 1 : 0; this.lieK = p === 'lie' ? 1 : 0; }
+  }
+  get lying(): boolean { return this.lieK > 0.15; }
 
   attach(o: Object3D): void { this.hand.add(o); this.carrying = true; }
 
   /** speed01 — доля от полной скорости ходьбы. */
   update(dt: number, t: number, speed01: number): void {
     this.walk = damp(this.walk, speed01, 10, dt);
-    this.poseK = damp(this.poseK, this.pose === 'stand' ? 0 : 1, 4, dt);
+    this.poseK = damp(this.poseK, this.pose === 'sit' ? 1 : 0, 4, dt);
+    this.lieK = damp(this.lieK, this.pose === 'lie' ? 1 : 0, 2.6, dt);
+    this.root.rotation.x = -1.46 * this.lieK;
+    this.root.position.y = 0.14 * this.lieK;
     this.phase += dt * (5.2 + 4.5 * this.walk) * (this.walk > 0.02 ? 1 : 0);
     const w = this.walk, s = Math.sin(this.phase), k = this.poseK;
     const breath = Math.sin(t * 1.7) * 0.012;
