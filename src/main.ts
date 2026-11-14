@@ -9,7 +9,7 @@ import { DEPTH1 } from './data/level';
 import { STYLE } from './data/styles';
 import { Game } from './scenes/game';
 import { addOil } from './systems/lamp';
-import { onRestart } from './systems/story';
+import { onRestart, savedPoint } from './systems/story';
 import { mountDebug } from './ui/debug';
 import { Hud } from './ui/hud';
 import { Stage } from './view/stage';
@@ -43,7 +43,8 @@ function boot(autostart: boolean): void {
   const input = new Input(hud.area, hud.mark);
   hud.input = input;
   game = new Game(stage, hud, input, sfx, STYLE, def, { skip: params.has('skip') });
-  if (autostart) game.story.begin();
+  const point = savedPoint();
+  if (autostart && point) game.story.resume(point); else if (autostart) game.story.begin();
   if (params.has('debug')) {
     dbg = mountDebug(ui, {
       '+20 масла': () => addOil(game.lamp, 20),

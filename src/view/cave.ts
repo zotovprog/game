@@ -11,7 +11,7 @@ import { Grid, Kind } from '../world/grid';
 import { darkify } from './darkness';
 
 const SUB = 2, STEP = 1 / SUB, CH = 16;
-const WALL_H: Record<Kind, number> = { rubble: 3.2, mine: 2.8, columns: 4.2, water: 3.4, void: 2.3, fissure: 4.4, gate: 4.8 };
+const WALL_H: Record<Kind, number> = { rubble: 3.0, mine: 2.8, columns: 3.5, water: 3.2, void: 2.4, fissure: 3.4, gate: 4.2 };
 const TONE: Record<Kind, number> = { rubble: 1, mine: 0.92, columns: 1.06, water: 0.72, void: 0.8, fissure: 0.95, gate: 1.1 };
 
 export interface Cave { group: Group; dispose(): void }
@@ -90,12 +90,32 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
       const gxd = S(gx + 1, gz, d) - S(gx - 1, gz, d), gzd = S(gx, gz + 1, d) - S(gx, gz - 1, d), gl = Math.hypot(gxd, gzd) || 1;
       const facing = (gxd + gzd) / gl * 0.7071;
       const Hk = WALL_H[kind] * (0.8 + 0.45 * fbm(x * 0.15, z * 0.15, seed + 3, 2));
-      const H = lerp(Hk, 0.8, smooth(-0.1, 0.6, facing));
+      const low = smooth(-0.1, 0.6, facing);
+      const H = lerp(Hk, 1.2, low);
       h = 0.13 + H * (1 - Math.exp(-d * 1.9)) + (fbm(x * 0.42, z * 0.42, seed + 6, 2) - 0.5) * 0.9 * smooth(0.3, 1.7, d) + (hash2(gx, gz, seed + 4) - 0.5) * 0.03;
       const strata = 0.5 + 0.5 * Math.sin(h * 4.2 + fbm(x * 0.5, z * 0.5, seed + 12, 2) * 6);
-      col.copy(rA).lerp(rB, strata * 0.8).multiplyScalar(TONE[kind] * (1 - 0.06 * Math.min(h, 4)));
+      // за гребнем стены ничего нет: камень там чёрный, чтобы не казалось, будто туда можно пройти
+      const beyond = (1 - low * smooth(0.3, 0.9, d)) * (1 - smooth(1.15, 2.0, d));
+      col.copy(rA).lerp(rB, strata * 0.8).multiplyScalar(TONE[kind] * (1 - 0.06 * Math.min(h, 4)) * beyond);
     }
     hgt[v] = h; rgb[v * 3] = col.r; rgb[v * 3 + 1] = col.g; rgb[v * 3 + 2] = col.b;
+  }
+  // стены сглаживаются ещё раз по высоте: без торчащих граней и «осколков»
+  for (let pass = 0; pass < 2; pass++) {
+    const nx = hgt.slice();
+    for (let gz = 1; gz < VH - 1; gz++) for (let gx = 1; gx < VW - 1; gx++) {
+      const v = gz * VW + gx;
+      if (Number.isNaN(hgt[v]) || !(sd[v] > 0.2)) continue;
+      let sum = 0, wsum = 0;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        const q = hgt[v + dj * VW + di];
+        if (Number.isNaN(q)) continue;
+        const wgt = (di === 0 ? 2 : 1) * (dj === 0 ? 2 : 1);
+        sum += q * wgt; wsum += wgt;
+      }
+      nx[v] = sum / wsum;
+    }
+    hgt.set(nx);
   }
   const terrainMat = darkify(new MeshStandardMaterial({ vertexColors: true, roughness: 0.93, metalness: 0 }), true);
   trash.push(terrainMat);

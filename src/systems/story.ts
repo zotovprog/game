@@ -64,7 +64,7 @@ export class Story {
     g.hud.screen({
       title: TX.title, sub: TX.subtitle, button: TX.start,
       small: `${g.hud.controlsHint()}<br>${TX.headphones}${seen ? `<br>${seen}` : ''}`,
-      onButton: () => this.begin(),
+      onButton: () => { clearSaved(); this.begin(); },
     });
   }
 
@@ -117,7 +117,78 @@ export class Story {
     g.sfx.ignite();
     g.dark.scatter();
     if (!g.flags.has('brazier')) { g.flags.add('brazier'); g.after(1.5, () => g.hud.hint(TX.brazier, 8)); }
+    g.after(g.flags.has('checkHint') ? 0.5 : 10, () => { if (!g.flags.has('checkHint')) { g.flags.add('checkHint'); g.hud.hint(TX.checkpoint, 7); } });
+    this.checkpoint();
   }
+
+  // ---------- точка возврата: огонь помнит, каким ты к нему пришёл
+  checkpoint(): void {
+    const g = this.g, n = g.npcs, m = g.mila, sh = g.shade;
+    const npc = (c: Npc) => ({ state: c.state === 'crawl' ? 'follow' as const : c.state, x: c.x, z: c.z, goal: c.goal ? { ...c.goal } : null });
+    saved = {
+      x: g.pos.x, z: g.pos.z, oil: Math.max(g.lamp.oil, 45), wick: g.lamp.wick, flags: [...g.flags],
+      braziers: g.braziers.map((b, i) => (b.f.lit ? i : -1)).filter((i) => i >= 0),
+      flasks: g.flasks.map((f, i) => (f.taken && !f.own ? i : -1)).filter((i) => i >= 0),
+      holes: g.holes.map((h, i) => (h.done ? i : -1)).filter((i) => i >= 0),
+      wisps: g.wisps.filter((w) => w.w.out).map((w) => w.id), toy: g.toy.taken,
+      npcs: { efim: npc(n.efim), vera: npc(n.vera), boy: npc(n.boy) }, order: g.companions.map((c) => c.id),
+      mila: { state: m.state, x: m.x, z: m.z }, family: g.family.state,
+      shade: { state: sh.state, x: sh.x, z: sh.z, isTrue: sh.isTrue },
+    };
+  }
+
+  /** Вернуться к огню после гибели: мир и отряд такие, какими были, когда ты его зажёг. */
+  resume(s: Snapshot): void {
+    const g = this.g, m = g.mila, sh = g.shade;
+    g.sfx.init(); g.sfx.restore();
+    g.hud.screen(null);
+    g.mode = 'play'; g.hero.setPose('stand', true); g.setStood(); g.takeLamp();
+    g.stage.fade = 1;
+    for (let i = 0; i <= 20; i++) g.after(0.3 + i * 0.1, () => { g.stage.fade = 1 - i / 20; });
+    g.lamp.oil = s.oil; g.lamp.wick = s.wick; g.pos.x = s.x; g.pos.z = s.z;
+    g.stage.target.set(s.x, 0, s.z);
+    for (const f of s.flags) g.flags.add(f);
+    for (const i of s.braziers) { const b = g.braziers[i]; b.f.lit = true; b.f.k = 1; }
+    for (const i of s.flasks) { const f = g.flasks[i]; if (f) { f.taken = true; f.g.visible = false; } }
+    for (const i of s.holes) g.holes[i].done = true;
+    for (const w of g.wisps) if (s.wisps.includes(w.id)) { w.w.out = true; w.w.k = 0; }
+    if (s.toy) { g.toy.taken = true; g.toy.g.visible = false; }
+    g.family.state = s.family;
+    if (s.family === 'fire') { g.family.fire.lit = true; g.family.fire.k = 1; }
+    for (const id of s.order) {
+      const n = g.npcs[id], d = s.npcs[id];
+      this.giveCandle(n, 0);
+      n.x = d.x; n.z = d.z; n.state = d.state; n.goal = d.goal;
+    }
+    for (const id of ['efim', 'vera', 'boy'] as const) {
+      if (s.order.includes(id)) continue;
+      const n = g.npcs[id], d = s.npcs[id];
+      n.x = d.x; n.z = d.z;
+      n.state = d.state === 'walkoff' ? 'gone' : d.state;
+      if (n.state === 'gone') n.h.root.visible = false;
+    }
+    if (s.mila.state === 'carried') this.carryMila(g.hero, 'carried');
+    else if (s.mila.state === 'vera') this.carryMila(g.npcs.vera.h, 'vera');
+    else {
+      m.state = s.mila.state; m.x = s.mila.x; m.z = s.mila.z;
+      m.h.root.position.set(m.x, 0, m.z);
+      if (m.state === 'lost') m.h.root.visible = false;
+      m.ember.visible = m.state === 'wait' || m.state === 'left';
+    }
+    sh.isTrue = s.shade.isTrue; sh.state = s.shade.state; sh.x = s.shade.x; sh.z = s.shade.z;
+    if (sh.state === 'gone') { sh.v.alpha = 0; sh.v.update(0); }
+    g.chroma = 0;
+  }
+
+  // ---------- вал тьмы в конце
+  waveStart(): void {
+    const g = this.g;
+    g.wave.on = true; g.wave.s = T.wave.start;
+    g.sfx.gust(); g.stage.shake = 0.6;
+    g.hud.hint(TX.wave[0], 4);
+    g.after(4.2, () => { if (g.wave.on) g.hud.hint(TX.wave[1], 4); });
+  }
+  waveEnd(): void { this.g.hud.hint(TX.waveEnd, 5); this.g.dark.scatter(); }
 
   pickToy(): void {
     const g = this.g;
@@ -289,6 +360,7 @@ export class Story {
         g.lamp.oil -= share;
         f.fire.lit = true; f.state = 'fire';
         g.flags.add('familyFire');
+        g.after(0.1, () => this.checkpoint());
         g.sfx.ignite(); g.dark.scatter(); g.sfx.voice('father');
         g.hud.say(tx.realName, tx.fireDone, () => { g.after(0.4, () => this.line(tx.boy, tx.barks[0], 'boy')); });
       } else if (i === 1) {
@@ -549,8 +621,6 @@ export class Story {
       g.flags.add('keeper');
       g.hud.hint(TX.keeper, 5);
     }
-    const want = !g.lamp.held || !g.flags.has('firstDark') ? 0 : T.spirits.count + (g.flags.has('longDark') ? 2 : 0);
-    if (g.dark.count < want) g.dark.setCount(want);
   }
 
   private zone(id: string): void {
@@ -574,6 +644,8 @@ export class Story {
       if (v.state === 'wait' && g.flags.has('veraMet')) { g.flags.add('veraLeft'); v.state = 'walkoff'; }
     } else if (id === 'gust') {
       if (g.shade.state === 'follow' && !g.shade.isTrue) this.betray(); else this.gustScare();
+    } else if (id === 'wave') {
+      this.waveStart();
     } else if (id === 'named') {
       this.returned();
     } else if (id === 'gateHall') {
@@ -756,6 +828,7 @@ export class Story {
     tr.runs++; tr.lastDeath = null; tr.beacon = beacon;
     saveTrace(tr);
     g.hud.showHud(false);
+    clearSaved();
     g.hud.screen({ title: E[kind].title, sub: '', lines: [...E[kind].open, ...lines, E.tally(out, below)], mem: E.memory, button: TX.again, black: true, onButton: () => restart() });
   }
 
@@ -768,12 +841,26 @@ export class Story {
     saveTrace(tr);
     g.after(4, () => {
       g.hud.showHud(false);
-      g.hud.screen({ title: E.title, sub: '', lines: E.lines, button: TX.again, black: true, onButton: () => restart() });
+      g.hud.screen({ title: E.title, sub: '', lines: E.lines, button: saved ? TX.backToFire : TX.again, black: true, onButton: () => restart() });
     });
   }
 }
 
-/** Начать заново: main.ts пересобирает игру на месте и сразу запускает вступление. */
+export interface Snapshot {
+  x: number; z: number; oil: number; wick: number; flags: string[];
+  braziers: number[]; flasks: number[]; holes: number[]; wisps: string[]; toy: boolean;
+  npcs: Record<'efim' | 'vera' | 'boy', { state: Npc['state']; x: number; z: number; goal: { x: number; z: number } | null }>;
+  order: ('efim' | 'vera' | 'boy')[];
+  mila: { state: Game['mila']['state']; x: number; z: number };
+  family: Game['family']['state'];
+  shade: { state: Game['shade']['state']; x: number; z: number; isTrue: boolean };
+}
+let saved: Snapshot | null = null;
+/** Точка возврата (если герой зажигал огонь). */
+export const savedPoint = (): Snapshot | null => saved;
+export function clearSaved(): void { saved = null; }
+
+/** Начать заново: main.ts пересобирает игру на месте; если есть точка возврата — с неё. */
 export function restart(): void { restartHook(); }
 let restartHook: () => void = () => {};
 export function onRestart(fn: () => void): void { restartHook = fn; }

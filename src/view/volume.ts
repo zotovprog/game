@@ -82,7 +82,8 @@ void main(){
       float n = n1 * 0.5 + n2 * 0.32 + n3 * 0.18;
       // волны идут по дыму внутрь, к лампе; при малом свете — чаще и глубже
       float surge = sin(dn * 6.0 - uTime * (0.7 + uPress * 1.4) + n1 * 7.0) * 0.5 + 0.5;
-      float edge = dn + (n - 0.5) * uBillow - surge * (0.06 + 0.18 * uPress) * smoothstep(0.35, 1.0, dn);
+      float breath = sin(uTime * (0.55 + 0.9 * uPress)) * (0.02 + 0.07 * uPress);
+      float edge = dn + (n - 0.5) * uBillow - surge * (0.06 + 0.2 * uPress) * smoothstep(0.35, 1.0, dn) + breath;
       float wall = smoothstep(0.84 - 0.14 * uPress, 1.08 - 0.1 * uPress, edge);   // при малом свете стена подступает ближе
       // со стороны камеры стена низкая (иначе закроет героя), с дальней — нависает
       vec2 rl = p.xz - uLamp;
@@ -91,8 +92,8 @@ void main(){
       wall *= 1.0 - smoothstep(0.45, 1.0, p.y / hLim + (n - 0.5) * 0.9);
       // позёмка: по полу тьма затекает в круг пальцами
       float fingers = smoothstep(0.5, 0.72, n2 * 0.6 + n3 * 0.4 + (dn - 0.62 + 0.2 * uPress) * 0.9);
-      float creep = fingers * (1.0 - smoothstep(0.0, 0.3 + 0.55 * uPress + 0.3 * n1, p.y)) * smoothstep(0.25 - 0.1 * uPress, 0.6, dn);
-      float rho = max(wall, creep * (0.55 + 0.45 * uPress));
+      float creep = fingers * (1.0 - smoothstep(0.0, 0.35 + 0.7 * uPress + 0.3 * n1, p.y)) * smoothstep(0.22 - 0.12 * uPress, 0.55, dn);
+      float rho = max(wall, creep * (0.7 + 0.3 * uPress));
       // языки: тьма тянется к лампе
       for (int k = 0; k < TEND_MAX; k++) {
         vec4 Tn = uTendrils[k];
@@ -156,7 +157,7 @@ export class VolumePass extends Pass {
         tDepth: { value: null }, uNoise: { value: noiseTexture() }, uSteps: { value: VolumePass.LEVELS[level][1] },
         uCamPos: { value: new Vector3() }, uCamRight: { value: new Vector3() }, uCamUp: { value: new Vector3() }, uCamFwd: { value: new Vector3() },
         uNear: { value: 0.1 }, uFar: { value: 200 }, uTime: darkU.uTime, uPress: { value: 0 },
-        uTop: { value: 3.3 }, uSigma: { value: 3.4 }, uAlbedo: { value: 0.04 }, uHaze: { value: 0.0025 }, uBillow: { value: 0.66 },
+        uTop: { value: 3.4 }, uSigma: { value: 4.2 }, uAlbedo: { value: 0.0035 }, uHaze: { value: 0.0 }, uBillow: { value: 0.7 },
         uLights: darkU.uLights, uLightCount: darkU.uLightCount, uTendrils: darkU.uTendrils, uLamp: darkU.uLamp,
         uGlowPos: { value: this.glowPos }, uGlowCol: { value: this.glowCol }, uGlowDist: { value: this.glowDist },
       },

@@ -7,6 +7,10 @@ export interface AudioState {
   fire: number;          // 0..1 — близость живого огня
   dawn: number;          // 0..1 — близость Врат
   quiet: boolean;        // меню/пауза/финал: приглушить
+  zone: string;          // характер места: rubble / mine / columns / water / void / fissure / gate
+  dread: number;         // 0..1 — общий страх: от него зависят пульс, провалы тишины, диссонанс
+  oil: number;           // 0..1 — сколько масла: на донышке слышен тонкий звон
+  wave: number;          // 0..1 — насколько близко вал тьмы
 }
 
 export type Voice = 'efim' | 'vera' | 'father' | 'mother' | 'mila' | 'boy' | 'shade';
@@ -17,7 +21,10 @@ export class Sfx {
   private white!: AudioBuffer; private brown!: AudioBuffer;
   private droneG!: GainNode; private dreadG!: GainNode; private airG!: GainNode; private airF!: BiquadFilterNode;
   private whG!: GainNode; private whPan!: StereoPannerNode; private hissG!: GainNode; private fireG!: GainNode; private dawnG!: GainNode;
-  private tWh = 0; private tBeat = 0; private tDrip = 2; private tSputter = 0; private tFire = 0;
+  private tWh = 0; private tBeat = 0; private tSputter = 0; private tFire = 0;
+  private drone: OscillatorNode[] = [];
+  private roarG!: GainNode; private whineG!: GainNode;
+  private tZone = 3; private tPulse = 0; private tSwell = 8; private tHush = 20; private hush = 0; private zoneNow = '';
   private stepFlip = false;
 
   get ready(): boolean { return this.ctx !== null; }
@@ -43,6 +50,7 @@ export class Sfx {
     this.droneG = this.gain(0.0, this.master);
     for (const [f, type, g] of [[41, 'sine', 1], [43.4, 'sine', 0.8], [82.6, 'triangle', 0.16], [123.2, 'sine', 0.07]] as [number, OscillatorType, number][]) {
       const o = c.createOscillator(); o.type = type; o.frequency.value = f;
+      this.drone.push(o);
       o.connect(this.gain(g, this.droneG)); o.start();
     }
     // тревога: тесный кластер, слышен только когда свет мал
@@ -71,6 +79,13 @@ export class Sfx {
     this.dawnG = this.gain(0, this.master);
     this.dawnG.connect(this.gain(0.8, this.rev));
     for (const f of [110, 164.8, 220, 277.2, 329.6]) { const o = c.createOscillator(); o.type = 'sine'; o.frequency.value = f; o.connect(this.gain(f < 200 ? 0.5 : 0.25, this.dawnG)); o.start(); }
+    // вал тьмы: низкий рёв по следу
+    this.roarG = this.gain(0, this.master);
+    const rl = c.createBiquadFilter(); rl.type = 'lowpass'; rl.frequency.value = 260;
+    this.loop(this.brown).connect(rl).connect(this.roarG); this.roarG.connect(this.gain(0.5, this.rev));
+    // масло на донышке: тонкий звон в ушах
+    this.whineG = this.gain(0, this.master);
+    for (const f of [3050, 3127]) { const o = c.createOscillator(); o.type = 'sine'; o.frequency.value = f; o.connect(this.whineG); o.start(); }
     this.master.gain.setTargetAtTime(0.85, c.currentTime, 1.5);
   }
 
@@ -115,14 +130,76 @@ export class Sfx {
     o.start(t); o.stop(t + dur + 0.05);
   }
 
+  /** Высота гула и набор случайных звуков для каждой зоны: пещера звучит по-разному. */
+  private static ZONES: Record<string, { hz: number; air: number; every: [number, number] }> = {
+    rubble: { hz: 41, air: 240, every: [5, 11] }, mine: { hz: 36.7, air: 180, every: [4, 9] }, columns: { hz: 49, air: 320, every: [5, 10] },
+    water: { hz: 32.7, air: 150, every: [1.2, 3.5] }, void: { hz: 27.5, air: 420, every: [6, 12] }, fissure: { hz: 43.6, air: 520, every: [4, 9] }, gate: { hz: 55, air: 300, every: [6, 12] },
+  };
+  private zoneSound(zone: string, dread: number): void {
+    const pan = Math.random() * 1.8 - 0.9, r = Math.random();
+    if (zone === 'mine') {
+      if (r < 0.45) { const f = 160 + Math.random() * 120; this.tone('sawtooth', f, f * (0.7 + Math.random() * 0.5), 0.5 + Math.random() * 0.6, 0.035, pan, 1.3, 0.12); }   // скрип крепи
+      else if (r < 0.75) { this.tone('triangle', 520 + Math.random() * 300, 180, 0.9, 0.03, pan, 1.8, 0.004); }                                      // звон железа
+      else for (let i = 0; i < 4; i++) setTimeout(() => this.ctx && this.burst(this.brown, 'bandpass', 900 + Math.random() * 900, 500, 0.06, 0.12, pan, 0.9, 2), i * (90 + Math.random() * 120)); // осыпь
+    } else if (zone === 'water') {
+      const f = 900 + Math.random() * 1500; this.tone('sine', f, f * 0.5, 0.08, 0.05, pan, 1.6);                                                     // капля
+      if (r < 0.2) setTimeout(() => this.ctx && this.burst(this.brown, 'lowpass', 300, 90, 0.7, 0.25, pan, 0.8), 200);                              // что-то плеснуло
+    } else if (zone === 'columns') {
+      const f = [196, 233, 262, 311][Math.floor(Math.random() * 4)] * (Math.random() < 0.3 ? 0.5 : 1);
+      this.tone('sine', f, f * 0.995, 3.5, 0.028, pan, 2.4, 0.4); this.tone('sine', f * 2.01, f * 2, 2.2, 0.008, -pan, 2.4, 0.3);                    // камень гудит
+    } else if (zone === 'void') {
+      this.burst(this.brown, 'bandpass', 180 + Math.random() * 120, 520 + Math.random() * 300, 3.2 + Math.random() * 2, 0.5, pan, 0.6, 1.6);         // вой ветра
+    } else if (zone === 'fissure') {
+      if (r < 0.5) this.burst(this.white, 'bandpass', 2400, 700, 0.12, 0.09, pan, 1.6, 3);                                                           // треск камня
+      else this.burst(this.brown, 'bandpass', 420, 260, 1.6, 0.35, pan, 0.9, 1.8);                                                                   // вздох в щели
+    } else {
+      const f = 1100 + Math.random() * 1200; this.tone('sine', f, f * 0.55, 0.07, 0.035, pan, 1.2);
+      if (r < 0.25) for (let i = 0; i < 3; i++) setTimeout(() => this.ctx && this.burst(this.brown, 'bandpass', 800 + Math.random() * 700, 400, 0.07, 0.1, pan, 0.9, 2), i * 140);
+    }
+    if (dread > 0.55 && r > 0.8) this.tone('sine', 82, 77, 2.6, 0.12 * dread, 0, 0.8, 0.9);                                                          // глухой толчок из глубины
+  }
+
   update(dt: number, s: AudioState): void {
     if (!this.ctx) return;
     const t = this.now, k = 0.25;
-    const q = s.quiet ? 0.35 : 1;
-    this.droneG.gain.setTargetAtTime((0.1 + 0.16 * s.pressure) * q, t, k);
-    this.dreadG.gain.setTargetAtTime(Math.pow(Math.max(s.pressure, s.near * 0.8), 2) * 0.05 * q, t, 0.6);
-    this.airG.gain.setTargetAtTime((0.05 + 0.05 * s.pressure) * q, t, k);
-    this.airF.frequency.setTargetAtTime(220 + 160 * Math.sin(t * 0.13) + 200 * s.pressure, t, 1);
+    const Z = Sfx.ZONES[s.zone] ?? Sfx.ZONES.rubble;
+    // провалы тишины: гул вдруг обрывается — и это страшнее гула. Чем глубже, тем чаще.
+    this.tHush -= dt;
+    if (this.tHush <= 0 && !s.quiet) { this.tHush = 38 - 20 * s.dread + Math.random() * 14; this.hush = 2.2 + Math.random() * 1.6; }
+    this.hush = Math.max(0, this.hush - dt);
+    const q = (s.quiet ? 0.35 : 1) * (this.hush > 0 ? 0.04 : 1);
+    // гул: высота своя у каждой зоны, плывёт и «дышит», а не стоит на месте
+    if (s.zone !== this.zoneNow) {
+      this.zoneNow = s.zone;
+      const mult = [1, 1.058, 2.01, 3.0];
+      this.drone.forEach((o, i) => o.frequency.setTargetAtTime(Z.hz * mult[i], t, 2.5));
+    }
+    const breathe = 0.75 + 0.25 * Math.sin(t * 0.21) * Math.sin(t * 0.083 + 1.3);
+    this.droneG.gain.setTargetAtTime((0.045 + 0.1 * s.dread + 0.1 * s.pressure) * breathe * q, t, this.hush > 0 ? 0.08 : 0.6);
+    this.drone[1]?.detune.setTargetAtTime(Math.sin(t * 0.07) * 35 + s.dread * 40, t, 1);
+    this.dreadG.gain.setTargetAtTime(Math.pow(Math.max(s.pressure, s.near * 0.8, s.dread * 0.75), 2) * 0.06 * q, t, 0.6);
+    this.airG.gain.setTargetAtTime((0.03 + 0.05 * s.pressure + (s.zone === 'void' ? 0.06 : 0)) * q, t, k);
+    this.airF.frequency.setTargetAtTime(Z.air + 120 * Math.sin(t * 0.13) + 200 * s.pressure, t, 1);
+    this.roarG.gain.setTargetAtTime(s.quiet ? 0 : s.wave * s.wave * 0.9, t, 0.3);
+    this.whineG.gain.setTargetAtTime(s.quiet || s.oil > 0.25 ? 0 : (0.25 - s.oil) * 0.03, t, 0.5);
+    // звуки места
+    this.tZone -= dt;
+    if (this.tZone <= 0 && !s.quiet && this.hush <= 0) { this.tZone = Z.every[0] + Math.random() * (Z.every[1] - Z.every[0]); this.zoneSound(s.zone, s.dread); }
+    // пульс страха: редкие глухие удары, которые учащаются к Вратам
+    if (s.dread > 0.3 && !s.quiet && this.hush <= 0) {
+      this.tPulse -= dt;
+      if (this.tPulse <= 0) {
+        this.tPulse = 1.9 - 1.25 * s.dread;
+        this.tone('sine', 46, 40, 0.5, 0.13 + 0.25 * s.dread, 0, 0.5, 0.01);
+        if (s.dread > 0.7) setTimeout(() => this.ctx && this.tone('triangle', 92, 88, 0.2, 0.05, 0, 0.6, 0.01), (this.tPulse * 1000) / 2);
+      }
+    }
+    // наплывы диссонанса
+    this.tSwell -= dt;
+    if (this.tSwell <= 0 && !s.quiet) {
+      this.tSwell = 16 - 9 * s.dread + Math.random() * 8;
+      if (s.dread > 0.25) { const f = 180 + Math.random() * 140, d = 3.5 + Math.random() * 2; for (const m of [1, 1.06, 1.5 + Math.random() * 0.05]) this.tone('sawtooth', f * m, f * m * (0.97 + Math.random() * 0.06), d, 0.012 + 0.02 * s.dread, Math.random() * 1.6 - 0.8, 1.6, d * 0.5); }
+    }
     this.hissG.gain.setTargetAtTime(0.0035 * s.power * q, t, k);
     this.fireG.gain.setTargetAtTime(0.11 * s.fire * q, t, 0.4);
     this.dawnG.gain.setTargetAtTime(0.05 * s.dawn, t, 1.2);
@@ -149,9 +226,6 @@ export class Sfx {
       }
     }
     this.beat = Math.max(0, this.beat - dt * 3.5);
-    // капли
-    this.tDrip -= dt;
-    if (this.tDrip <= 0 && !s.quiet) { this.tDrip = 2.5 + Math.random() * 7; const f = 1100 + Math.random() * 1200; this.tone('sine', f, f * 0.55, 0.07, 0.035, Math.random() * 1.6 - 0.8, 1.2); }
     // чихание пламени на остатках масла
     this.tSputter -= dt;
     if (this.tSputter <= 0 && s.power < 0.22 && s.power > 0 && !s.quiet) { this.tSputter = 0.1 + Math.random() * 0.7; this.burst(this.white, 'highpass', 3000, 2500, 0.025, 0.03, 0, 0); }
@@ -206,9 +280,20 @@ export class Sfx {
     }, i * 120);
   }
   /** Голоса самой тьмы: всегда из черноты, сбоку, с долгим эхом. */
-  dark(kind: 'moan' | 'click' | 'breath' | 'knock' | 'cry' | 'scrape', pan: number, vol: number): void {
+  dark(kind: 'moan' | 'click' | 'breath' | 'knock' | 'cry' | 'scrape' | 'hiss' | 'sizzle', pan: number, vol: number): void {
     if (!this.ctx) return;
     const c = this.ctx, t = this.now;
+    if (kind === 'hiss') {
+      // она набирает воздух: нарастающий шёпот-шипение с той стороны, откуда бросится
+      this.burst(this.white, 'bandpass', 500, 3400, 1.35, 0.26 * vol, pan, 0.5, 2.2);
+      this.tone('sawtooth', 58, 96, 1.35, 0.1 * vol, pan, 0.4, 1.1);
+      return;
+    }
+    if (kind === 'sizzle') {
+      this.burst(this.white, 'highpass', 7000, 2200, 0.5, 0.2 * vol, pan, 0.5);
+      this.tone('sine', 1400, 300, 0.35, 0.05 * vol, pan, 0.6);
+      return;
+    }
     if (kind === 'moan') {
       const f = 70 + Math.random() * 70, d = 1.6 + Math.random() * 1.4;
       const o = c.createOscillator(); o.type = 'sawtooth';

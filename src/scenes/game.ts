@@ -99,12 +99,19 @@ export class Game {
   private stillHinted = false;
   private drift = { x: 0, z: 0, dx: 0, dz: 0 };
   private flow = [0, 0];
+  private flowStart = 1;        // шагов от места пробуждения до Врат
+  /** 0..1 — страх: растёт от входа к Вратам и с каждой потерей; от него зависят броски, дым, звук и расход масла */
+  dread = 0;
+  /** вал тьмы, идущий по следу героя в конце: s — на сколько метров он позади */
+  readonly wave = { on: false, s: 99 };
+  private lastPos = { x: 0, z: 0 };
 
   constructor(readonly stage: Stage, readonly hud: Hud, readonly input: Input, readonly sfx: Sfx, readonly style: Style, readonly def: LevelDef, opts: { skip: boolean }) {
     const scene = stage.scene;
     this.grid = new Grid(def.w, def.h, def.carves, def.seed);
     scene.add(buildCave(this.grid, style, def).group);
     this.grid.buildFlow(def.gate.bowl[0], def.gate.bowl[1]);
+    this.flowStart = Math.max(1, this.grid.flowAt(...this.grid.snap(def.start.hero[0], def.start.hero[1])));
     const snap = (p: [number, number], c = 0.7) => this.grid.snap(p[0], p[1], c);
 
     // герой и лампа
@@ -283,7 +290,7 @@ export class Game {
   setStood(): void { this.stood = true; }
   /** Мир глазами тьмы — нужен и сюжету (для появления «вернувшихся»). */
   world(active = true): DarkWorld {
-    return { px: this.pos.x, pz: this.pos.z, fx: this.face.x, fz: this.face.z, rx: this.stage.right.x, rz: this.stage.right.z, radius: this.radius, wick: this.lamp.wick, ember: false, active, safe: [] };
+    return { px: this.pos.x, pz: this.pos.z, fx: this.face.x, fz: this.face.z, rx: this.stage.right.x, rz: this.stage.right.z, radius: this.radius, wick: this.lamp.wick, ember: false, active, dread: this.dread, repel: this.lamp.wick >= T.dread.repelWick && this.lamp.oil > 0, safe: [] };
   }
 
   pause(on: boolean): void {
@@ -410,6 +417,28 @@ export class Game {
     }
   }
 
+  /** Вал: в конце тьма идёт по твоему следу. Остановишься — накроет; отставших накрывает первыми. */
+  private runWave(dt: number): void {
+    const W = this.wave, moved = Math.hypot(this.pos.x - this.lastPos.x, this.pos.z - this.lastPos.z);
+    this.lastPos.x = this.pos.x; this.lastPos.z = this.pos.z;
+    if (!W.on) return;
+    const gp = this.gate.group.position;
+    if (this.dist(gp.x, gp.z) < 11) { W.on = false; W.s = 99; this.story.waveEnd(); return; }
+    W.s = clamp(W.s + moved - T.wave.speed * dt, 0, 30);
+    const [wx, wz] = this.trail(W.s);
+    this.dark.extra.push({ x: wx, z: wz, w: 3.6, s: 1 });
+    if (W.s < T.wave.reach) {
+      this.lamp.oil = Math.max(0, this.lamp.oil - T.wave.drain * dt);
+      this.stage.shake = Math.max(this.stage.shake, 0.35); this.chroma = Math.max(this.chroma, 0.5);
+    }
+    let k = 0;
+    for (const n of this.companions) {
+      if (n.state !== 'follow') continue;
+      k++;
+      if (T.party.spacing * k > W.s - 0.6) { n.out = Math.max(n.out, T.party.grace + 0.01); n.grab += dt / 1.3; }
+    }
+  }
+
   /** Отряд и свет: кто выпал из круга дольше грейса — того тьма тащит; вернул свет — отпускает. */
   private party(dt: number): void {
     for (const n of this.companions) {
@@ -502,7 +531,14 @@ export class Game {
     const wasOil = lamp.oil;
     let load = 0;
     for (const n of this.companions) if (n.state === 'follow') load += n.load;
-    if (live) stepLamp(lamp, dt, load);
+    // страх: глубина + потери; до первой встречи с тьмой его нет
+    const steps = this.grid.flowAt(this.pos.x, this.pos.z);
+    const depth = steps < 65535 ? clamp(1 - steps / this.flowStart, 0, 1) : 0.5;
+    const wantDread = !lamp.held || !this.flags.has('firstDark') ? 0 : clamp(lerp(T.dread.start, T.dread.deep, depth) + this.story.tally().lost * T.dread.perLost + (this.wave.on ? 0.15 : 0), 0, 1);
+    this.dread = damp(this.dread, wantDread, 0.6, dt);
+    if (live && lamp.held && this.flags.has('firstDark')) this.dark.setCount(1 + Math.round(this.dread * 4));
+    if (live) stepLamp(lamp, dt, load, 1 + T.dread.burnBonus * this.dread);
+    if (live) this.runWave(dt);
     if (lamp.held && wasOil > T.lamp.lowOil && lamp.oil <= T.lamp.lowOil) hud.hint(TX.oilLow, 4);
     if (lamp.held && wasOil > 0 && lamp.oil <= 0) { hud.hint(TX.ember, 4); this.sfx.snuff(); }
     const rTarget = lamp.held ? lightRadius(lamp) : 2.3;
@@ -572,12 +608,14 @@ export class Game {
     // тьма
     const w = this.world(lamp.held && this.mode === 'play' && !talking && this.dist(gp.x, gp.z) > 9 && this.dist(this.shade.x, this.shade.z) > (this.shade.state === 'wait' ? 7 : 0));
     w.ember = this.ember || this.gust > 0.5; w.safe = safe;
+    if (inSafe) w.repel = true;
     const touched = this.dark.update(dt, w);
     if (touched && live && this.gust < 0.1) {
       if (this.ember) this.die();
       else {
         lamp.oil = Math.max(0, lamp.oil - T.lamp.touchDrain * (touched.kind === 'shade' ? 1 : 1.6));
-        this.sfx.touch(); S.shake = 0.7; this.chroma = 1;
+        this.sfx.touch(); S.shake = 0.8; this.chroma = 1;
+        if (!this.flags.has('biteHint')) { this.flags.add('biteHint'); hud.hint(TX.biteHint, 8); }
         this.dark.dismiss(touched);
         hud.whisper(TX.whispers[Math.floor(this.rng() * TX.whispers.length)]);
       }
@@ -604,6 +642,7 @@ export class Game {
     if (this.mode === 'end') pr = 0;
     this.pressure = damp(this.pressure, pr, this.mode === 'dead' ? 1.2 : 2.5, dt);
     S.pressure = clamp(this.pressure + this.sfx.beat * 0.045, 0, 1);
+    S.dread = this.dread;
     S.viewHTarget = this.mode === 'end' ? 17 : 14 - 3.2 * this.pressure;
     this.chroma = Math.max(0, this.chroma - dt * 1.6);
     S.chroma = this.chroma * 0.02 + (this.ember ? 0.003 : 0);
@@ -612,6 +651,7 @@ export class Game {
       pressure: this.pressure, power, near: this.dark.nearness, pan: side, fire: fireNear,
       dawn: Math.max(this.gate.open, 1 - smooth(4, 26, this.dist(gp.x, gp.z))) * (this.mode === 'menu' ? 0 : 1),
       quiet: this.mode === 'menu' || this.mode === 'dead',
+      zone: this.grid.kindAt(this.pos.x, this.pos.z), dread: this.dread, oil: lamp.held ? lamp.oil / 100 : 1, wave: this.wave.on ? 1 - smooth(1.5, 16, this.wave.s) : 0,
     });
 
     // сквозняк: пыль сносит к выходу

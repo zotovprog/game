@@ -17,10 +17,10 @@ export function burnRate(wick: number, companions: number): number {   // compan
   return (L.burnBase + Math.pow(wick, L.burnPow) * L.burnWick) * (1 + companions * L.companionBurn);
 }
 
-/** Насколько пламя «живо» из-за остатка масла: 1 — норма, 0 — тлеет. */
+/** Насколько пламя «живо» из-за остатка масла: 1 — полная лампа, oilFloor — на донышке. Круг сжимается вместе с маслом. */
 export function oilVigor(oil: number): number {
-  const v = Math.min(1, oil / T.lamp.lowOil);
-  return oil <= 0 ? 0 : 0.35 + 0.65 * v;
+  const L = T.lamp;
+  return oil <= 0 ? 0 : L.oilFloor + (1 - L.oilFloor) * Math.sqrt(Math.min(1, oil / 100));
 }
 
 /** Радиус круга света в метрах. */
@@ -34,13 +34,14 @@ export function lightRadius(s: LampState): number {
 /** Сила пламени 0..1 для вида и звука. */
 export function flamePower(s: LampState): number {
   if (s.oil <= 0) return 0.05 * (1 - s.snuff);
-  return Math.max(0.05, (0.18 + 0.82 * s.wick) * oilVigor(s.oil) * (1 - s.snuff * 0.92));
+  return Math.max(0.05, (0.18 + 0.82 * s.wick) * (0.4 + 0.6 * oilVigor(s.oil)) * (1 - s.snuff * 0.92));
 }
 
-export function stepLamp(s: LampState, dt: number, companions: number): void {
+/** mult — множитель расхода (на глубине тьма сама пьёт масло). */
+export function stepLamp(s: LampState, dt: number, companions: number, mult = 1): void {
   if (!s.held) return;
   if (s.oil > 0) {
-    s.oil = Math.max(0, s.oil - burnRate(s.wick, companions) * dt);
+    s.oil = Math.max(0, s.oil - burnRate(s.wick, companions) * mult * dt);
     s.ember = 0;
   } else {
     s.ember += dt;

@@ -7,17 +7,22 @@ import { darkU, TEND_MAX } from '../view/darkness';
 import { Grid } from '../world/grid';
 
 export type DarkKind = 'shade' | 'efim' | 'vera' | 'family';
-export type DarkSound = 'moan' | 'click' | 'breath' | 'knock' | 'cry' | 'scrape';
+export type DarkSound = 'moan' | 'click' | 'breath' | 'knock' | 'cry' | 'scrape' | 'hiss' | 'sizzle';
 export interface Hunter {
   kind: DarkKind; x: number; z: number; ang: number; orbit: number; off: number;
-  state: 'lurk' | 'gone' | 'lunge'; timer: number; stuck: number; seed: number;
+  state: 'lurk' | 'gone' | 'windup' | 'lunge'; timer: number; stuck: number; seed: number;
   alpha: number; burn: number; probe: number; probeT: number;
+  cool: number;                     // сколько секунд до следующего броска
+  fake: boolean;                    // срежиссированный бросок: пугает, но не кусает
+  run: number;                      // сколько метров уже пролетел бросок
 }
 export interface SafeLight { x: number; z: number; r: number }
 export interface DarkWorld {
   px: number; pz: number; fx: number; fz: number;     // герой и куда он смотрит
   rx: number; rz: number;                             // «вправо» на экране — для панорамы звука
   radius: number; wick: number; ember: boolean; active: boolean;
+  dread: number;                                      // 0..1 — насколько тьма осмелела
+  repel: boolean;                                     // свет сейчас достаточно ярок, чтобы сжечь бросок
   safe: SafeLight[];
 }
 
@@ -37,7 +42,7 @@ export class Darkness {
 
   private make(kind: DarkKind): Hunter {
     const seed = this.rng();
-    const h: Hunter = { kind, x: 0, z: 0, ang: this.rng() * 6.283, orbit: this.rng() < 0.5 ? -1 : 1, off: this.rng() * 1.2, state: 'gone', timer: this.rng() * 2, stuck: 0, seed, alpha: 0, burn: 0, probe: 0, probeT: 3 + this.rng() * 6 };
+    const h: Hunter = { kind, x: 0, z: 0, ang: this.rng() * 6.283, orbit: this.rng() < 0.5 ? -1 : 1, off: this.rng() * 1.2, state: 'gone', timer: this.rng() * 2, stuck: 0, seed, alpha: 0, burn: 0, probe: 0, probeT: 3 + this.rng() * 6, cool: 6 + this.rng() * 8, fake: false, run: 0 };
     this.hunters.push(h);
     return h;
   }
@@ -56,7 +61,7 @@ export class Darkness {
   /** Бросок: язык тьмы выстреливает из черноты к герою и сгорает у самой лампы. */
   lunge(x: number, z: number): void {
     const h = this.hunters.find((s) => s.kind === 'shade' && s.state !== 'lunge') ?? this.make('shade');
-    h.x = x; h.z = z; h.state = 'lunge'; h.timer = 0; h.burn = 0; h.alpha = 1;
+    h.x = x; h.z = z; h.state = 'lunge'; h.timer = 0; h.burn = 0; h.alpha = 1; h.fake = true; h.run = 0;
   }
 
   /** Вспыхнул огонь: тьма отшатывается. */
@@ -67,6 +72,11 @@ export class Darkness {
   /** Насытился или сгорел: исчезает и вернётся позже. */
   dismiss(h: Hunter): void {
     h.state = 'gone'; h.timer = h.kind === 'shade' ? T.spirits.respawn : 14; h.alpha = 0;
+  }
+
+  /** Пауза до следующего броска: от lungeSlow в начале до lungeFast на глубине. */
+  private cooldown(dread: number, named: boolean): number {
+    return (T.dread.lungeSlow + (T.dread.lungeFast - T.dread.lungeSlow) * dread) * (0.7 + this.rng() * 0.6) * (named ? 0.6 : 1);
   }
 
   private pickAngle(h: Hunter, w: DarkWorld, D: number): void {
@@ -96,12 +106,29 @@ export class Darkness {
       const dist = Math.hypot(dx, dz);
       const named = h.kind !== 'shade';
 
+      if (h.state === 'windup') {
+        // слышно и видно, что она сейчас бросится: язык набухает у самой границы света
+        h.timer += dt;
+        const k = Math.min(1, h.timer / T.dread.windup);
+        const reach = Math.max(1.2, Math.min(dist, w.radius * (1.0 - 0.3 * k)));
+        if (tn < TEND_MAX && dist > 0.01) tend[tn++].set(w.px + (dx / dist) * reach, w.pz + (dz / dist) * reach, 1.4 + k * 1.2, 1);
+        near = Math.max(near, 0.6 + 0.4 * k);
+        this.nearestAngle = Math.atan2(dz, dx);
+        if (h.timer >= T.dread.windup) { h.state = 'lunge'; h.timer = 0; h.burn = 0; h.fake = false; h.run = 0; }
+        continue;
+      }
       if (h.state === 'lunge') {
         h.timer += dt;
-        if (dist > 1.1 && h.burn < 0.05) { h.x -= (dx / dist) * 12 * dt; h.z -= (dz / dist) * 12 * dt; }
-        else h.burn = Math.min(1, h.burn + dt * 2.0);
+        const step = T.dread.lungeSpeed * (h.fake ? 1.3 : 1) * dt;
+        if (dist > 1.0 && h.burn < 0.05) { h.x -= (dx / dist) * step; h.z -= (dz / dist) * step; h.run += step; }
+        else if (h.burn < 0.05 && !h.fake) {
+          // дотянулась: яркий свет сжигает бросок, тусклый — она отпивает масло
+          if (w.repel) { h.burn = 0.06; this.onSound('sizzle', 0, 1); }
+          else { touched = h; h.state = 'gone'; h.timer = S.respawn; h.alpha = 0; h.cool = this.cooldown(w.dread, named); continue; }
+        }
+        if (h.burn >= 0.05 || h.fake && dist <= 1.0 || h.run > T.dread.lungeReach) h.burn = Math.min(1, Math.max(h.burn, 0.05) + dt * 2.0);
         if (tn < TEND_MAX) tend[tn++].set(h.x, h.z, 2.2, 1 - h.burn);
-        if (h.burn >= 1) { h.state = 'gone'; h.timer = S.respawn; h.alpha = 0; }
+        if (h.burn >= 1) { h.state = 'gone'; h.timer = S.respawn * (h.fake ? 1 : 1.6); h.alpha = 0; h.cool = this.cooldown(w.dread, named); }
         near = 1;
         continue;
       }
@@ -156,6 +183,13 @@ export class Darkness {
 
       const inRock = !this.grid.isFloor(h.x, h.z);
       h.alpha = damp(h.alpha, inRock ? 0 : 1, 3, dt);
+      // бросок: чем глубже и страшнее, тем чаще
+      h.cool -= dt;
+      if (h.cool <= 0 && !inRock && !burning && !w.ember && dist < w.radius + 4.5 && h.alpha > 0.6) {
+        h.state = 'windup'; h.timer = 0;
+        this.onSound('hiss', clamp((dx * w.rx + dz * w.rz) / 5, -1, 1), 1);
+        continue;
+      }
       const live = h.alpha * (1 - h.burn);
       const reach = Math.max(0.9, dist - h.probe * (named ? 2.6 : 2.1));
       if (tn < TEND_MAX && live > 0.05 && dist > 0.01) tend[tn++].set(w.px + (dx / dist) * reach, w.pz + (dz / dist) * reach, (named ? 1.5 : 1.0) + h.seed * 0.7, live);

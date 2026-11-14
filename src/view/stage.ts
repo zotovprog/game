@@ -67,6 +67,8 @@ export class Stage {
   readonly up = new Vector3();      // «вверх» на экране в плоскости пола
   shake = 0;
   pressure = 0; chroma = 0; fade = 0;
+  /** 0..1 — общий страх: от него дым подступает ближе даже при ярком свете */
+  dread = 0;
   readonly mobile: boolean;
   private t = 0;
   private slow = 0;             // сколько секунд подряд кадры идут медленно
@@ -152,7 +154,7 @@ export class Stage {
     darkU.uCutPos.value.set(focus.x, 0.9, focus.z);
     darkU.uCutDir.value.copy(this.camDir);
     const u = this.grade.uniforms;
-    this.volume.press = this.pressure;
+    this.volume.press = Math.max(this.pressure, this.dread * 0.7);
     // слабое устройство: если кадры долго идут медленнее ~27 в секунду, дым считается грубее
     if (dt > 0 && !navigator.webdriver) {
       this.slow = dt > 1 / 27 ? this.slow + dt : Math.max(0, this.slow - dt * 2);
