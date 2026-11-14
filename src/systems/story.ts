@@ -515,6 +515,7 @@ export class Story {
         this.line(TX.family.boy, TX.hole.done, 'boy', 4);
       }
     }
+    if (!g.flags.has('cairn') && g.def.cairns.some((c) => g.dist(c[0], c[1]) < 2.6)) { g.flags.add('cairn'); g.hud.hint(TX.cairn, 6); }
     // чутьё спутников и голоса тех, кого ты ещё не нашёл
     if ((this.senseT -= dt) <= 0) {
       this.senseT = 2.5;

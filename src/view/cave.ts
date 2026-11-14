@@ -84,7 +84,8 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
       const dIn = -d;
       h = (fbm(x * 0.9, z * 0.9, seed + 5, 3) - 0.5) * 0.1 + 0.13 * (1 - smooth(0, 0.8, dIn)) ** 2;
       if (kind === 'water') h -= 0.36 * smooth(0.5, 2.0, dIn);
-      col.copy(cA).lerp(cB, clamp((fbm(x * 0.23, z * 0.23, seed + 9, 3) - 0.3) * 2.2, 0, 1)).multiplyScalar(TONE[kind] * (0.95 + hash2(gx, gz, seed) * 0.1));
+      const grit = fbm(x * 1.9, z * 1.9, seed + 14, 2);                    // мелкая фактура: камень, а не ровная плита
+      col.copy(cA).lerp(cB, clamp((fbm(x * 0.23, z * 0.23, seed + 9, 3) - 0.3) * 2.2, 0, 1)).multiplyScalar(TONE[kind] * (0.62 + grit * 0.7) * (0.92 + hash2(gx, gz, seed) * 0.16));
     } else {
       // камень со стороны камеры (+x+z от пола) — низкий бортик, иначе закроет героя
       const gxd = S(gx + 1, gz, d) - S(gx - 1, gz, d), gzd = S(gx, gz + 1, d) - S(gx, gz - 1, d), gl = Math.hypot(gxd, gzd) || 1;
@@ -117,7 +118,7 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
     }
     hgt.set(nx);
   }
-  const terrainMat = darkify(new MeshStandardMaterial({ vertexColors: true, roughness: 0.93, metalness: 0 }), true);
+  const terrainMat = darkify(new MeshStandardMaterial({ vertexColors: true, roughness: 0.93, metalness: 0 }), true, false, true);
   trash.push(terrainMat);
   const P = (gx: number, gz: number, out: Vector3, fb: Vector3): Vector3 => {
     if (gx < 0 || gz < 0 || gx >= VW || gz >= VH) return out.copy(fb);
@@ -161,12 +162,21 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
   }
 
   // ---------- что стоит в пещере
-  const rockMat = darkify(new MeshStandardMaterial({ color: 0xffffff, roughness: 0.92 }), true);
+  const rockMat = darkify(new MeshStandardMaterial({ color: 0xffffff, roughness: 0.92 }), true, false, true);
   const woodMat = darkify(new MeshStandardMaterial({ color: 0x2a2018, roughness: 1 }), true);
   const ironMat = darkify(new MeshStandardMaterial({ color: 0x23262a, roughness: 0.55, metalness: 0.7 }));
   const boneMat = darkify(new MeshStandardMaterial({ color: 0xa8a294, roughness: 0.8 }));
   trash.push(rockMat, woodMat, ironMat, boneMat);
-  const boulderGeo = knead(new SphereGeometry(1, 9, 7), 0.5, seed + 1);
+  const boulderGeo = new SphereGeometry(1, 9, 7);
+  { // глыба: мятая, приплюснутая, с плоским низом — не шар
+    const bp = boulderGeo.getAttribute('position') as BufferAttribute;
+    for (let i = 0; i < bp.count; i++) {
+      const x = bp.getX(i), y = bp.getY(i), z = bp.getZ(i);
+      const k = 0.72 + fbm(x * 1.1 + y * 0.8 + 3, z * 1.1 - y * 0.6 + 9, seed + 1, 3) * 0.75;
+      bp.setXYZ(i, x * k * (1 + 0.25 * Math.sign(x) * hash2(i, 3, seed)), Math.max(-0.35, y * k * 0.62), z * k);
+    }
+    boulderGeo.computeVertexNormals();
+  }
   const spikeGeo = new ConeGeometry(0.34, 1.7, 10, 9);
   { // сталагмит: наплывы, тупая вершина, лёгкий изгиб
     const sp = spikeGeo.getAttribute('position') as BufferAttribute;
@@ -239,6 +249,62 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
     e.set(Math.PI / 2 + (rng() - 0.5) * 0.3, rng() * 6.28, rng() * 6.28); q.setFromEuler(e);
     bones.push({ m: new Matrix4().compose(p.set(bx, 0.04, bz), q, s.set(1, 0.6 + rng() * 0.9, 1)), c: new Color(1, 1, 1).multiplyScalar(0.7 + rng() * 0.3) });
   }
+  // пирамидки: кто-то не дошёл и оставил лампу на камнях
+  const lampGeo = new BoxGeometry(0.13, 0.2, 0.13);
+  trash.push(lampGeo);
+  const deadLamps: Inst[] = [];
+  for (const cp of def.cairns) {
+    const [x, z] = grid.snap(cp[0], cp[1], 0.6);
+    let y = 0;
+    for (let k = 0; k < 4; k++) {
+      const r = 0.34 - k * 0.07 + rng() * 0.04;
+      e.set(rng() * 0.3, rng() * 6.28, rng() * 0.3); q.setFromEuler(e);
+      boulders.push({ m: new Matrix4().compose(p.set(x + (rng() - 0.5) * 0.08, y + r * 0.3, z + (rng() - 0.5) * 0.08), q, s.set(r, r * 0.75, r)), c: tint() });
+      y += r * 0.55;
+    }
+    e.set(0.25, rng() * 6.28, 0.1); q.setFromEuler(e);
+    deadLamps.push({ m: new Matrix4().compose(p.set(x, y + 0.1, z), q, s.set(1, 1, 1)), c: new Color(1, 1, 1) });
+    grid.obstacles.push({ x, z, r: 0.4 });
+  }
+  // выработка: ящики, бочки, брошенные доски
+  const crateGeo = new BoxGeometry(1, 1, 1), barrelGeo = new CylinderGeometry(0.5, 0.44, 1, 9), plankGeo = new BoxGeometry(1.5, 0.05, 0.2);
+  trash.push(crateGeo, barrelGeo, plankGeo);
+  const crates: Inst[] = [], barrels: Inst[] = [], planks: Inst[] = [], rubble: Inst[] = [];
+  const wood = () => new Color(1, 1, 1).multiplyScalar(0.7 + rng() * 0.5);
+  for (let j = 0; j < grid.h; j++) for (let i = 0; i < grid.w; i++) {
+    if (!grid.floorCell(i, j)) continue;
+    const kind = grid.kindAt(i, j), x = i + 0.5 + (rng() - 0.5) * 0.4, z = j + 0.5 + (rng() - 0.5) * 0.4;
+    const wd = grid.wallDist(x, z);
+    if (kind === 'mine' && wd < 1.4 && wd > 0.5 && clear(x, z, 1.6)) {
+      const roll = rng();
+      if (roll < 0.05) {
+        const k = 0.42 + rng() * 0.3;
+        e.set(0, rng() * 6.28, 0); q.setFromEuler(e);
+        crates.push({ m: new Matrix4().compose(p.set(x, k / 2, z), q, s.set(k, k, k)), c: wood() });
+        if (rng() < 0.35) crates.push({ m: new Matrix4().compose(p.set(x + 0.1, k + k * 0.35, z - 0.05), q, s.set(k * 0.7, k * 0.7, k * 0.7)), c: wood() });
+        grid.obstacles.push({ x, z, r: k * 0.62 });
+      } else if (roll < 0.075) {
+        const k = 0.5 + rng() * 0.2, tip = rng() < 0.3;
+        e.set(tip ? Math.PI / 2 : 0, rng() * 6.28, 0); q.setFromEuler(e);
+        barrels.push({ m: new Matrix4().compose(p.set(x, tip ? k * 0.5 : k * 0.55, z), q, s.set(k, k * 1.1, k)), c: wood() });
+        grid.obstacles.push({ x, z, r: k * 0.55 });
+      }
+    }
+    if (kind === 'mine' && rng() < 0.03) {
+      e.set(0, rng() * 6.28, (rng() - 0.5) * 0.1); q.setFromEuler(e);
+      planks.push({ m: new Matrix4().compose(p.set(x, 0.05, z), q, s.set(0.6 + rng() * 0.6, 1, 1)), c: wood() });
+    }
+    // россыпь щебня: несколько камней кучкой
+    if (rng() < (kind === 'rubble' || kind === 'void' ? 0.045 : 0.02)) {
+      const n = 3 + Math.floor(rng() * 5);
+      for (let k = 0; k < n; k++) {
+        const sc = 0.06 + rng() * 0.15, an = rng() * 6.28, rr = rng() * 0.55;
+        e.set(rng() * 6.28, rng() * 6.28, rng() * 6.28); q.setFromEuler(e);
+        rubble.push({ m: new Matrix4().compose(p.set(x + Math.cos(an) * rr, sc * 0.35, z + Math.sin(an) * rr), q, s.set(sc * (1 + rng() * 0.6), sc * 0.7, sc)), c: tint() });
+      }
+    }
+  }
+
   const add = (geo: BufferGeometry, mat: MeshStandardMaterial, arr: Inst[], shadow = true) => {
     if (!arr.length) return;
     const im = new InstancedMesh(geo, mat, arr.length);
@@ -249,6 +315,8 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
   };
   add(boulderGeo, rockMat, boulders); add(spikeGeo, rockMat, spikes); add(colGeo, rockMat, columns);
   add(pebbleGeo, rockMat, pebbles); add(boneGeo, boneMat, bones, false);
+  add(pebbleGeo, rockMat, rubble); add(lampGeo, ironMat, deadLamps, false);
+  add(crateGeo, woodMat, crates); add(barrelGeo, woodMat, barrels); add(plankGeo, woodMat, planks, false);
 
   // ---------- старая выработка: крепь, рельсы, вагонетка
   const mk = (geo: BufferGeometry, mat: MeshStandardMaterial, x: number, y: number, z: number, ry = 0, shadow = true) => {

@@ -35,6 +35,19 @@ uniform float uEdgeNoise; uniform vec2 uHeight;
 uniform vec3 uCutPos; uniform vec3 uCutDir; uniform float uCutR;
 varying vec3 vDarkPos;
 ${NOISE}
+#ifdef DARK_ROCK
+vec3 rockDetail(vec3 col, vec3 p){
+  float g1 = dkFbm(p.xz * 2.3 + p.y * 1.9);                                    // пятна и крошка
+  float g2 = dkNoise(p.xz * 9.0 + p.y * 7.0);                                  // зерно
+  float strata = 0.5 + 0.5 * sin(p.y * 12.0 + dkFbm(p.xz * 0.8) * 8.0);        // слои породы на стенах
+  float wallK = smoothstep(0.3, 0.9, p.y);
+  float tone = mix(0.6 + 0.8 * g1, (0.58 + 0.42 * strata) * (0.7 + 0.65 * g1), wallK) * (0.85 + 0.3 * g2);
+  float cr = abs(dkNoise(p.xz * 0.85 + 3.1) - 0.5);                            // трещины: тёмные линии по полу и стенам
+  float cr2 = abs(dkNoise(p.xz * 2.1 + vec2(p.y * 1.3, 9.7)) - 0.5);
+  tone *= (0.45 + 0.55 * smoothstep(0.0, 0.03, cr)) * (0.7 + 0.3 * smoothstep(0.0, 0.02, cr2));
+  return col * tone;
+}
+#endif
 vec3 darkApply(vec3 col, vec3 p){
   float d = 9.0;
   for (int i = 0; i < DARK_MAX; i++) {
@@ -84,7 +97,8 @@ const CUT = /* glsl */ `
 `;
 
 /** Подключает тьму к стандартному материалу. cut — вырез вокруг героя (для стен). */
-export function darkify<T extends Material>(mat: T, cut = false, tall = false): T {
+/** cut — вырез вокруг героя (стены); tall — без затухания по высоте (Врата); rock — фактура камня. */
+export function darkify<T extends Material>(mat: T, cut = false, tall = false, rock = false): T {
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, darkU);
     shader.vertexShader = shader.vertexShader
@@ -99,11 +113,12 @@ export function darkify<T extends Material>(mat: T, cut = false, tall = false): 
         vDarkPos = (modelMatrix * dkP).xyz;`,
       );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${cut ? '#define DARK_CUT\n' : ''}${tall ? '#define DARK_TALL\n' : ''}${FRAG_HEAD}`)
+      .replace('#include <common>', `#include <common>\n${cut ? '#define DARK_CUT\n' : ''}${tall ? '#define DARK_TALL\n' : ''}${rock ? '#define DARK_ROCK\n' : ''}${FRAG_HEAD}`)
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\n${CUT}`)
+      .replace('#include <color_fragment>', `#include <color_fragment>\n#ifdef DARK_ROCK\n  diffuseColor.rgb = rockDetail(diffuseColor.rgb, vDarkPos);\n#endif`)
       .replace('#include <dithering_fragment>', 'gl_FragColor.rgb = darkApply(gl_FragColor.rgb, vDarkPos);\n#include <dithering_fragment>');
   };
-  mat.customProgramCacheKey = () => `dark${cut ? '-cut' : ''}${tall ? '-tall' : ''}`;
+  mat.customProgramCacheKey = () => `dark${cut ? '-cut' : ''}${tall ? '-tall' : ''}${rock ? '-rock' : ''}`;
   return mat;
 }
 

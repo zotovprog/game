@@ -64,7 +64,7 @@ export class Lantern {
     const unstable = power < 0.35 ? (0.35 - power) * 2.2 : 0;            // слабое пламя дрожит сильнее
     this.flicker = 1 - (0.1 + unstable * 0.5) * n;
     const p = power * this.flicker;
-    this.light.intensity = (3.5 + 25 * p) * gain * (power > 0.001 ? 1 : 0);
+    this.light.intensity = (3 + 19 * p) * gain * (power > 0.001 ? 1 : 0);
     this.light.distance = Math.max(1.5, radius * 1.55);
     const fc = (this.flame.material as MeshBasicMaterial).color;
     fc.copy(this.flameColor).lerp(new Color(0xffffff), 0.35).multiplyScalar(1.2 + 3.5 * p);
