@@ -69,6 +69,7 @@ export class Stage {
   pressure = 0; chroma = 0; fade = 0;
   readonly mobile: boolean;
   private t = 0;
+  private slow = 0;             // сколько секунд подряд кадры идут медленно
 
   constructor(readonly canvas: HTMLCanvasElement, public style: Style) {
     this.mobile = matchMedia('(pointer: coarse)').matches;
@@ -90,7 +91,7 @@ export class Stage {
     const rt = new WebGLRenderTarget(4, 4, { type: HalfFloatType, depthTexture: new DepthTexture(4, 4) });
     this.composer = new EffectComposer(this.renderer, rt);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.volume = new VolumePass(this.camera, this.mobile ? 0.4 : 0.5, this.mobile ? 9 : 14);
+    this.volume = new VolumePass(this.camera, this.mobile ? 1 : 0);
     this.composer.addPass(this.volume);
     this.bloom = new UnrealBloomPass(new Vector2(256, 256), style.bloom, 0.75, 0.9);
     this.composer.addPass(this.bloom);
@@ -152,6 +153,11 @@ export class Stage {
     darkU.uCutDir.value.copy(this.camDir);
     const u = this.grade.uniforms;
     this.volume.press = this.pressure;
+    // слабое устройство: если кадры долго идут медленнее ~27 в секунду, дым считается грубее
+    if (dt > 0 && !navigator.webdriver) {
+      this.slow = dt > 1 / 27 ? this.slow + dt : Math.max(0, this.slow - dt * 2);
+      if (this.slow > 2.5) { this.slow = 0; this.volume.degrade(); }
+    }
     u.uTime.value = this.t; u.uPressure.value = this.pressure; u.uChroma.value = this.chroma; u.uFade.value = this.fade;
     const p = lampWorld.clone().project(this.camera);
     (u.uCenter.value as Vector2).set(p.x * 0.5 + 0.5, p.y * 0.5 + 0.5);

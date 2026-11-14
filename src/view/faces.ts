@@ -1,8 +1,6 @@
-// Лица во тьме: бледные смазанные «рожи», нарисованные на canvas. Тьма состоит из них.
-import { AdditiveBlending, CanvasTexture, Color, Sprite, SpriteMaterial } from 'three';
+// Лицо для скримера: рисуется на canvas. В самой тьме картинок нет — она объёмная (view/volume.ts).
 import { mulberry32 } from '../core/rng';
 
-const cache: CanvasTexture[] = [];
 const canvases: HTMLCanvasElement[] = [];
 export const FACE_VARIANTS = 8;
 
@@ -79,34 +77,4 @@ function draw(seed: number): HTMLCanvasElement {
 export function faceCanvas(i: number): HTMLCanvasElement {
   const k = ((i % FACE_VARIANTS) + FACE_VARIANTS) % FACE_VARIANTS;
   return (canvases[k] ??= draw(k + 1));
-}
-export function faceTexture(i: number): CanvasTexture {
-  const k = ((i % FACE_VARIANTS) + FACE_VARIANTS) % FACE_VARIANTS;
-  return (cache[k] ??= new CanvasTexture(faceCanvas(k)));
-}
-
-/** Лицо-спрайт. opacity 0..1 задаёт, насколько оно проступило из черноты. */
-export class Face {
-  readonly sprite: Sprite;
-  private mat: SpriteMaterial;
-  private tintColor: Color;
-  size = 1;
-  constructor(variant: number, tint: number, readonly seed: number) {
-    this.tintColor = new Color(tint);
-    this.mat = new SpriteMaterial({ map: faceTexture(variant), color: this.tintColor.clone(), blending: AdditiveBlending, transparent: true, depthWrite: false });
-    this.sprite = new Sprite(this.mat);
-    this.sprite.renderOrder = 8;
-    this.sprite.visible = false;
-  }
-  /** stretch — насколько раскрыт рот/вытянуто лицо (0..1). */
-  set(t: number, opacity: number, stretch = 0): void {
-    const o = Math.max(0, opacity);
-    this.sprite.visible = o > 0.01;
-    if (!this.sprite.visible) return;
-    this.mat.color.copy(this.tintColor).multiplyScalar(o);
-    const breathe = 1 + Math.sin(t * 1.7 + this.seed * 30) * 0.05;
-    const tw = Math.sin(t * 9 + this.seed * 50) * 0.02 * (1 + stretch * 3);
-    this.sprite.scale.set(this.size * 0.67 * (breathe + tw), this.size * (breathe + stretch * 0.5 - tw), 1);
-    this.mat.rotation = Math.sin(t * 0.6 + this.seed * 20) * 0.12 + (this.seed - 0.5) * 0.5;
-  }
 }

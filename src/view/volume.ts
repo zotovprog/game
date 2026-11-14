@@ -39,9 +39,10 @@ function noiseTexture(): Data3DTexture {
 
 const VERT = /* glsl */ `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
 
-const fogFrag = (steps: number) => /* glsl */ `
+const fogFrag = /* glsl */ `
 precision highp sampler3D;
-#define STEPS ${steps}
+#define MAX_STEPS 16
+uniform int uSteps;
 #define DARK_MAX ${DARK_MAX}
 #define TEND_MAX ${TEND_MAX}
 #define GLOW_MAX ${GLOW_MAX}
@@ -66,29 +67,32 @@ void main(){
   vec3 scat = vec3(0.0);
   float T = 1.0;
   if (t1 > t0) {
-    float ds = (t1 - t0) / float(STEPS);
+    float ds = (t1 - t0) / float(uSteps);
     float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-    for (int i = 0; i < STEPS; i++) {
+    for (int i = 0; i < MAX_STEPS; i++) {
+      if (i >= uSteps) break;
       vec3 p = ro + uCamFwd * (t0 + (float(i) + jit) * ds);
       // насколько точка далеко от ближайшего света (1 — на границе круга)
       float dn = 9.0;
       for (int k = 0; k < DARK_MAX; k++) { if (k >= uLightCount) break; vec4 L = uLights[k]; dn = min(dn, length(p.xz - L.xz) / max(L.w, 0.001)); }
-      if (dn > 1.45) { T = 0.0; break; }                        // глубокая тьма: дальше смотреть не на что
-      vec3 q = p * vec3(0.3, 0.42, 0.3);
-      float n = noise(q + vec3(uTime * 0.05, -uTime * 0.085, -uTime * 0.04)) * 0.62
-              + noise(q * 2.7 + vec3(-uTime * 0.1, -uTime * 0.15, uTime * 0.07)) * 0.38;
+      vec3 q = p * vec3(0.42, 0.55, 0.42);
+      float n1 = noise(q + vec3(uTime * 0.05, -uTime * 0.085, -uTime * 0.04));
+      float n2 = noise(q * 2.6 + vec3(-uTime * 0.1, -uTime * 0.17, uTime * 0.07));
+      float n3 = noise(q * 6.3 + vec3(uTime * 0.16, -uTime * 0.3, -uTime * 0.12));
+      float n = n1 * 0.5 + n2 * 0.32 + n3 * 0.18;
       // волны идут по дыму внутрь, к лампе; при малом свете — чаще и глубже
-      float surge = sin(dn * 7.0 - uTime * (0.8 + uPress * 1.4) + n * 6.0) * 0.5 + 0.5;
-      float edge = dn + (n - 0.5) * uBillow - surge * (0.07 + 0.16 * uPress) * smoothstep(0.35, 1.0, dn);
-      float wall = smoothstep(0.64, 1.0, edge);
+      float surge = sin(dn * 6.0 - uTime * (0.7 + uPress * 1.4) + n1 * 7.0) * 0.5 + 0.5;
+      float edge = dn + (n - 0.5) * uBillow - surge * (0.06 + 0.18 * uPress) * smoothstep(0.35, 1.0, dn);
+      float wall = smoothstep(0.84 - 0.14 * uPress, 1.08 - 0.1 * uPress, edge);   // при малом свете стена подступает ближе
       // со стороны камеры стена низкая (иначе закроет героя), с дальней — нависает
       vec2 rl = p.xz - uLamp;
       float facing = dot(rl / max(length(rl), 0.001), vec2(0.7071));
-      float hLim = mix(top, 0.5 + 0.35 * uPress, smoothstep(-0.3, 0.7, facing));
-      wall *= 1.0 - smoothstep(0.5, 1.0, p.y / hLim + (n - 0.5) * 0.6);
-      // позёмка: по полу тьма затекает глубже в круг
-      float creep = smoothstep(0.34 - 0.14 * uPress, 0.9, dn + (n - 0.5) * 0.7) * (1.0 - smoothstep(0.0, 0.45 + 0.5 * uPress, p.y)) * (0.4 + 0.6 * uPress);
-      float rho = max(wall, creep);
+      float hLim = mix(top, 0.45 + 0.3 * uPress, smoothstep(-0.35, 0.6, facing));
+      wall *= 1.0 - smoothstep(0.45, 1.0, p.y / hLim + (n - 0.5) * 0.9);
+      // позёмка: по полу тьма затекает в круг пальцами
+      float fingers = smoothstep(0.5, 0.72, n2 * 0.6 + n3 * 0.4 + (dn - 0.62 + 0.2 * uPress) * 0.9);
+      float creep = fingers * (1.0 - smoothstep(0.0, 0.3 + 0.55 * uPress + 0.3 * n1, p.y)) * smoothstep(0.25 - 0.1 * uPress, 0.6, dn);
+      float rho = max(wall, creep * (0.55 + 0.45 * uPress));
       // языки: тьма тянется к лампе
       for (int k = 0; k < TEND_MAX; k++) {
         vec4 Tn = uTendrils[k];
@@ -98,10 +102,9 @@ void main(){
         float along = dot(rel, dir);
         float perp = along < 0.0 ? length(rel) : abs(dot(rel, vec2(-dir.y, dir.x)));
         float wdt = Tn.z * (0.35 + 0.65 * smoothstep(0.0, 3.0, along));
-        float body = (1.0 - smoothstep(wdt * 0.45, wdt, perp + (n - 0.5) * 0.5)) * Tn.w * (1.0 - smoothstep(0.4, 1.3 + max(along, 0.0) * 0.5, p.y));
+        float body = (1.0 - smoothstep(wdt * 0.4, wdt, perp + (n - 0.5) * 0.7)) * Tn.w * (1.0 - smoothstep(0.35, 1.2 + max(along, 0.0) * 0.5, p.y + (n2 - 0.5) * 0.6));
         rho = max(rho, body);
       }
-      rho += uHaze;
       float a = exp(-rho * uSigma * ds);
       // свет на дыме: лампа и живые огни
       vec3 Li = vec3(0.0);
@@ -110,7 +113,7 @@ void main(){
         float d2 = dot(v, v);
         Li += uGlowCol[k] / (1.0 + d2 * 0.5) * (1.0 - smoothstep(uGlowDist[k] * 0.45, uGlowDist[k], sqrt(d2)));
       }
-      scat += T * (1.0 - a) * Li * uAlbedo;
+      scat += T * ((1.0 - a) * uAlbedo * (0.35 + 1.6 * n3 * n2) + uHaze * ds) * Li;
       T *= a;
       if (T < 0.02) { T = 0.0; break; }
     }
@@ -137,17 +140,23 @@ export class VolumePass extends Pass {
   readonly glowDist = new Array<number>(GLOW_MAX).fill(0);
   press = 0;
 
-  constructor(private camera: OrthographicCamera, private scale: number, steps: number) {
+  /** Уровни качества: [масштаб буфера, число шагов луча]. Чем слабее устройство, тем выше уровень. */
+  static readonly LEVELS: [number, number][] = [[0.5, 14], [0.4, 10], [0.3, 7]];
+  level: number;
+  private size = { w: 4, h: 4 };
+
+  constructor(private camera: OrthographicCamera, level: number) {
     super();
+    this.level = level;
     this.low = new WebGLRenderTarget(4, 4, { type: HalfFloatType, depthBuffer: false });
     this.low.texture.minFilter = this.low.texture.magFilter = LinearFilter;
     this.fog = new ShaderMaterial({
-      vertexShader: VERT, fragmentShader: fogFrag(steps), depthTest: false, depthWrite: false,
+      vertexShader: VERT, fragmentShader: fogFrag, depthTest: false, depthWrite: false,
       uniforms: {
-        tDepth: { value: null }, uNoise: { value: noiseTexture() },
+        tDepth: { value: null }, uNoise: { value: noiseTexture() }, uSteps: { value: VolumePass.LEVELS[level][1] },
         uCamPos: { value: new Vector3() }, uCamRight: { value: new Vector3() }, uCamUp: { value: new Vector3() }, uCamFwd: { value: new Vector3() },
         uNear: { value: 0.1 }, uFar: { value: 200 }, uTime: darkU.uTime, uPress: { value: 0 },
-        uTop: { value: 3.3 }, uSigma: { value: 3.2 }, uAlbedo: { value: 0.11 }, uHaze: { value: 0.012 }, uBillow: { value: 0.5 },
+        uTop: { value: 3.3 }, uSigma: { value: 3.4 }, uAlbedo: { value: 0.04 }, uHaze: { value: 0.0025 }, uBillow: { value: 0.66 },
         uLights: darkU.uLights, uLightCount: darkU.uLightCount, uTendrils: darkU.uTendrils, uLamp: darkU.uLamp,
         uGlowPos: { value: this.glowPos }, uGlowCol: { value: this.glowCol }, uGlowDist: { value: this.glowDist },
       },
@@ -157,7 +166,17 @@ export class VolumePass extends Pass {
   }
 
   setSize(w: number, h: number): void {
-    this.low.setSize(Math.max(2, Math.round(w * this.scale)), Math.max(2, Math.round(h * this.scale)));
+    this.size.w = w; this.size.h = h;
+    const k = VolumePass.LEVELS[this.level][0];
+    this.low.setSize(Math.max(2, Math.round(w * k)), Math.max(2, Math.round(h * k)));
+  }
+  /** Понизить качество на ступень (устройство не тянет). Возвращает false, если ниже некуда. */
+  degrade(): boolean {
+    if (this.level >= VolumePass.LEVELS.length - 1) return false;
+    this.level++;
+    this.fog.uniforms.uSteps.value = VolumePass.LEVELS[this.level][1];
+    this.setSize(this.size.w, this.size.h);
+    return true;
   }
 
   render(renderer: WebGLRenderer, writeBuffer: WebGLRenderTarget, readBuffer: WebGLRenderTarget): void {
