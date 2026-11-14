@@ -410,9 +410,6 @@ export class Game {
 
   update(dt: number, t: number): void {
     const S = this.stage, lamp = this.lamp, hud = this.hud;
-    // палец ведёт героя относительно его места на экране
-    _v.set(this.pos.x, 1, this.pos.z).project(S.camera);
-    this.input.heroX = _v.x * 0.5 + 0.5; this.input.heroY = 1 - (_v.y * 0.5 + 0.5);
     this.input.update();
     if (this.input.hit('Escape', 'KeyP') && (this.mode === 'play' || this.paused)) this.pause(!this.paused);
     if (this.paused) { this.input.endFrame(); S.render(0, _focus.set(this.pos.x, 0, this.pos.z), this.lampWorld); return; }

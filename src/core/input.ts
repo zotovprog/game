@@ -1,13 +1,12 @@
-// Ввод: клавиатура по event.code, колёсико, палец/мышь «ведёт» героя. Игра читает действия, не клавиши.
+// Ввод: клавиатура по event.code, колёсико, плавающий стик под пальцем. Игра читает действия, не клавиши.
 export class Input {
   moveX = 0; moveY = 0;          // -1..1 в экранных осях (вправо, вверх)
   wickDelta = 0;                 // накопленное изменение фитиля от колёсика (сбрасывает игра)
   wickHold = 0;                  // -1 / 0 / 1 пока держат клавишу
   wickSet: number | null = null; // 0..1 — ползунок фитиля выставлен пальцем
-  heroX = 0.5; heroY = 0.5;      // где герой на экране (доли) — палец ведёт относительно него
   private keys = new Set<string>();
   private pressed = new Set<string>();
-  private ptr = { id: -1, x: 0, y: 0 };
+  private ptr = { id: -1, x: 0, y: 0, ox: 0, oy: 0 };   // палец и основание стика
   anyInput = false;
 
   constructor(area?: HTMLElement, private mark?: HTMLElement) {
@@ -22,22 +21,28 @@ export class Input {
     if (area) this.bindPointer(area);
   }
 
-  /** Палец (или зажатая мышь) в любом месте экрана: герой идёт в его сторону. */
+  /** Плавающий стик: появляется там, где коснулся, и ведёт героя туда, куда тянешь палец. */
   private bindPointer(el: HTMLElement): void {
+    const MAX = 54;
     const show = (on: boolean) => {
       if (!this.mark) return;
       this.mark.style.opacity = on ? '1' : '0';
-      this.mark.style.left = `${this.ptr.x}px`; this.mark.style.top = `${this.ptr.y}px`;
+      this.mark.style.left = `${this.ptr.ox}px`; this.mark.style.top = `${this.ptr.oy}px`;
+      this.mark.style.setProperty('--dx', `${this.ptr.x - this.ptr.ox}px`);
+      this.mark.style.setProperty('--dy', `${this.ptr.y - this.ptr.oy}px`);
     };
     el.addEventListener('pointerdown', (e) => {
       this.anyInput = true;
-      this.ptr.id = e.pointerId; this.ptr.x = e.clientX; this.ptr.y = e.clientY;
+      this.ptr.id = e.pointerId; this.ptr.x = this.ptr.ox = e.clientX; this.ptr.y = this.ptr.oy = e.clientY;
       el.setPointerCapture(e.pointerId);
       show(true);
     });
     el.addEventListener('pointermove', (e) => {
       if (e.pointerId !== this.ptr.id) return;
       this.ptr.x = e.clientX; this.ptr.y = e.clientY;
+      // увёл палец дальше края стика — основание тянется следом: легко сменить направление
+      const dx = this.ptr.x - this.ptr.ox, dy = this.ptr.y - this.ptr.oy, l = Math.hypot(dx, dy);
+      if (l > MAX) { this.ptr.ox += (dx / l) * (l - MAX); this.ptr.oy += (dy / l) * (l - MAX); }
       show(true);
     });
     const end = (e: PointerEvent) => { if (e.pointerId === this.ptr.id) { this.ptr.id = -1; show(false); } };
@@ -57,8 +62,8 @@ export class Input {
     if (this.down('KeyW', 'ArrowUp')) y += 1;
     if (this.down('KeyS', 'ArrowDown')) y -= 1;
     if (this.ptr.id !== -1) {
-      const dx = this.ptr.x - this.heroX * innerWidth, dy = this.heroY * innerHeight - this.ptr.y;
-      const l = Math.hypot(dx, dy), dead = 22, full = 90;
+      const dx = this.ptr.x - this.ptr.ox, dy = this.ptr.oy - this.ptr.y;
+      const l = Math.hypot(dx, dy), dead = 7, full = 46;
       if (l > dead) { const k = Math.min(1, (l - dead) / (full - dead)) / l; x = dx * k; y = dy * k; }
     }
     const l = Math.hypot(x, y);
