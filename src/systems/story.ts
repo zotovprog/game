@@ -87,6 +87,7 @@ export class Story {
     g.hero.setPose('stand', true);
     g.setStood();
     g.takeLamp();
+    g.flags.add('goal'); g.flags.add('dead');
     g.flags.add('firstDark');
     g.dark.setCount(T.spirits.count);
   }
@@ -94,9 +95,13 @@ export class Story {
   pickLamp(): void {
     const g = this.g;
     g.takeLamp();
-    g.hud.hint(TX.afterLamp, 5);
-    g.after(1.6, () => { g.hud.whisper(TX.whispers[0], 0.8); g.sfx.whisper(0.6, 0.1); });
-    g.after(6, () => g.hud.hint(g.hud.touch ? TX.hintWickTouch : TX.hintWickKb, 9));
+    g.flags.add('dead');                                    // записка — это и есть осмотр того, кто нёс лампу
+    g.hud.say('', [TX.afterLamp, ...TX.note], () => {
+      g.flags.add('goal');
+      g.hud.hint(TX.goalHint, 9);
+      g.after(1.6, () => { g.hud.whisper(TX.whispers[0], 0.8); g.sfx.whisper(0.6, 0.1); });
+      g.after(11, () => g.hud.hint(g.hud.touch ? TX.hintWickTouch : TX.hintWickKb, 9));
+    });
   }
 
   examineDead(): void {
@@ -134,7 +139,75 @@ export class Story {
     n.state = 'follow';
     g.companions.push(n);
     g.sfx.ignite();
+    if (!g.flags.has('partyHint')) { g.flags.add('partyHint'); g.after(7, () => g.hud.hint(TX.partyHint, 9)); }
   }
+
+  // ---------- отряд
+  /** Как зовут спутника (для реплик и меток). */
+  who(n: Npc): string { return n.id === 'boy' ? TX.family.boy : TX[n.id].realName; }
+  private voiceOf(n: Npc): Voice { return n.id; }
+  /** Счёт для строки цели. */
+  tally(): { with: number; found: number; lost: number } {
+    const g = this.g, f = g.flags, m = g.mila;
+    const here = g.companions.filter((c) => c.state === 'follow' || c.state === 'camp' || c.state === 'crawl').length + (m.state === 'carried' || m.state === 'vera' || m.state === 'down' ? 1 : 0);
+    const found = (f.has('efimMet') ? 1 : 0) + (f.has('veraMet') ? 1 : 0) + (f.has('milaMet') ? 1 : 0) + (f.has('familyMet') ? 4 : 0);
+    const lost = ['efimLost', 'veraLost', 'boyLost', 'milaLost'].filter((k) => f.has(k)).length + (g.npcs.vera.state === 'gone' && f.has('veraLeft') ? 1 : 0);
+    return { with: here, found, lost };
+  }
+  /** Тьма схватила отставшего: он зовёт. Ещё можно отбить светом. */
+  grabbed(n: Npc): void {
+    this.g.sfx.voice(this.voiceOf(n));                    // имя и стрелку показывает метка — см. Game.party
+    this.g.sfx.touch(); this.g.chroma = 0.6;
+  }
+  freed(n: Npc): void {
+    this.line(this.who(n), TX.freed[n.id], this.voiceOf(n), 3);
+    this.g.hud.dropMarker(`grab-${n.id}`);
+  }
+  /** Не успел: тьма утащила человека на глазах. */
+  taken(n: Npc): void {
+    const g = this.g;
+    n.state = 'gone'; n.h.root.visible = false; n.grab = 0; n.out = 0;
+    g.companions.splice(g.companions.indexOf(n), 1);
+    g.flags.add(`${n.id}Lost`);
+    g.hud.dropMarker(`grab-${n.id}`);
+    g.sfx.snuff(); g.sfx.touch(); g.sfx.dark('moan', 0, 1);
+    g.stage.shake = 0.7; g.chroma = 1;
+    g.dark.lunge(n.x, n.z);
+    let text = TX.taken(this.who(n));
+    if (n.id === 'vera' && g.mila.state === 'vera') { g.mila.state = 'lost'; g.flags.add('milaLost'); g.flags.add('milaLostVera'); text += ` ${TX.takenMila}`; }
+    g.hud.hint(text, 6);
+    const rest = g.companions.filter((c) => c.state === 'follow');
+    if (rest.length) g.after(2.6, () => { const r = rest[Math.floor(Math.random() * rest.length)]; if (r.state === 'follow') this.line(this.who(r), TX.lostReact[Math.floor(Math.random() * TX.lostReact.length)], this.voiceOf(r), 4); });
+  }
+  /** Оставить людей у живого огня: там тьма их не тронет, а ты пойдёшь быстрее. */
+  camp(x: number, z: number): void {
+    const g = this.g;
+    let k = 0;
+    for (const n of g.companions) {
+      if (n.state !== 'follow') continue;
+      const a = 0.9 + k++ * 1.5;
+      const [gx, gz] = g.grid.snap(x + Math.cos(a) * 1.5, z + Math.sin(a) * 1.5, 0.4);
+      n.state = 'camp'; n.goal = { x: gx, z: gz };
+    }
+    g.hud.hint(TX.camp.left, 5);
+  }
+  uncamp(x: number, z: number): void {
+    const g = this.g;
+    for (const n of g.companions) if (n.state === 'camp' && n.goal && Math.hypot(n.goal.x - x, n.goal.z - z) < 3) { n.state = 'follow'; n.goal = null; }
+    g.hud.hint(TX.camp.back, 4);
+  }
+  /** Лаз: взрослому не пролезть; Тёма сходит за маслом, если подождёшь со светом. */
+  hole(h: Game['holes'][number]): void {
+    const g = this.g, boy = g.npcs.boy;
+    if (boy.state !== 'follow') { g.hud.hint(TX.hole.adult, 6); return; }
+    h.busy = true;
+    boy.state = 'crawl'; boy.goal = { x: h.x, z: h.z };
+    this.crawl = { h, t: 0, inside: false };
+    this.line(TX.family.boy, TX.hole.go, 'boy', 3);
+  }
+  private crawl: { h: Game['holes'][number]; t: number; inside: boolean } | null = null;
+  private senseT = 3;
+  private sensed = new Set<string>();
 
   talkEfim(): void {
     const g = this.g, n = g.npcs.efim, tx = TX.efim;
@@ -358,6 +431,57 @@ export class Story {
   /** То, что происходит само, пока ты идёшь. */
   drama(dt: number): void {
     const g = this.g, m = g.mila, sh = g.shade;
+    // Тёма в лазу
+    if (this.crawl) {
+      const c = this.crawl, boy = g.npcs.boy;
+      if (!c.inside) { if (Math.hypot(boy.x - c.h.x, boy.z - c.h.z) < 0.75) { c.inside = true; boy.h.root.visible = false; g.sfx.step(0.5); } }
+      else if ((c.t += dt) >= T.party.holeTime) {
+        boy.h.root.visible = true; boy.state = 'follow'; boy.goal = null;
+        c.h.done = true; c.h.busy = false; this.crawl = null;
+        g.lamp.oil = Math.min(100, g.lamp.oil + T.party.holeOil);
+        g.sfx.pickup();
+        this.line(TX.family.boy, TX.hole.done, 'boy', 4);
+      }
+    }
+    // чутьё спутников и голоса тех, кого ты ещё не нашёл
+    if ((this.senseT -= dt) <= 0) {
+      this.senseT = 2.5;
+      const once = (key: string) => (this.sensed.has(key) ? false : (this.sensed.add(key), true));
+      const n = g.npcs;
+      const people: [string, number, number, Voice, boolean][] = [
+        ['efim', n.efim.x, n.efim.z, 'efim', n.efim.state === 'wait' && !g.flags.has('efimMet')],
+        ['vera', n.vera.x, n.vera.z, 'vera', n.vera.state === 'wait' && !g.flags.has('veraMet')],
+        ['family', g.family.x, g.family.z, 'father', g.family.state === 'wait' && !g.flags.has('familyMet')],
+        ['mila', m.x, m.z, 'mila', m.state === 'wait' && !g.flags.has('milaMet')],
+      ];
+      for (const [id, x, z, voice, unmet] of people) {
+        if (!unmet || g.dist(x, z) > T.party.callRange || g.dist(x, z) < g.radius || !once(`call-${id}`)) continue;
+        g.hud.marker(`call-${id}`, x, z, TX.mark.voice, 9);
+        g.sfx.voice(voice);
+        if (once('callHint')) g.hud.hint(TX.call, 5);
+      }
+      // Ефим чует масло
+      if (n.efim.state === 'follow') g.flasks.forEach((fl, i) => {
+        const d = g.dist(fl.x, fl.z);
+        if (fl.taken || fl.own || d > T.party.oilSense || d < g.radius + 1 || !once(`oil-${i}`)) return;
+        g.hud.marker(`oil-${i}`, fl.x, fl.z, TX.mark.oil, 10);
+        this.line(TX.efim.realName, TX.efim.sense, 'efim', 4);
+      });
+      // Мила видит, какой огонь ложный
+      if (m.state === 'carried' || m.state === 'vera') for (const w of g.wisps) {
+        if (w.w.out || g.dist(w.x, w.z) > 11 || !once(`wisp-${w.id}`)) continue;
+        this.line(TX.mila.realName, TX.mila.wisp, 'mila', 5);
+      }
+      // тень чует живых; ложная — ведёт на ложный огонь
+      if (sh.state === 'follow') {
+        const targets = sh.isTrue ? people.filter((p) => p[4]).map((p): [number, number] => [p[1], p[2]]) : g.wisps.filter((w) => !w.w.out).map((w): [number, number] => [w.x, w.z]);
+        const near = targets.filter(([x, z]) => g.dist(x, z) < 45).sort((p, q) => g.dist(p[0], p[1]) - g.dist(q[0], q[1]))[0];
+        if (near && g.dist(near[0], near[1]) > g.radius + 2) {
+          g.hud.marker('sense', near[0], near[1], TX.mark.someone, 3.2);
+          if (once(`sense-${Math.round(near[0])}`)) this.line(TX.shade.name, TX.shade.sense, 'shade', 4);
+        }
+      }
+    }
     // Мила на земле: без света она долго не выдержит
     if (m.state === 'down') {
       const lit = g.dist(m.x, m.z) < g.radius * 0.95 || g.braziers.some((b) => b.f.lit && Math.hypot(b.x - m.x, b.z - m.z) < T.fire.radius);
@@ -593,24 +717,31 @@ export class Story {
     const beacon = stayed !== null;
     if (heroOut) out++; else below++;
     const efim = g.npcs.efim, vera = g.npcs.vera, boy = g.npcs.boy, m = g.mila, sh = g.shade;
+    // оставленные у огня выходят, только если Врата кто-то держит
+    const camped = g.companions.filter((c) => c.state === 'camp');
+    const campOut = (c: Npc) => camped.includes(c) && beacon;
+    if (camped.length) lines.push(beacon ? W.campOut : W.campLeft);
     // Ефим
     if (stayed === 'efim') { lines.push(W.efimStay); below++; }
     else if (efim.state === 'exit') { lines.push(W.efimOut); out++; }
-    else { below++; if (f.has('efimLeft')) lines.push(W.efimLeft); }
+    else if (campOut(efim)) out++;
+    else { below++; if (f.has('efimLost')) lines.push(W.efimLost); else if (f.has('efimLeft')) lines.push(W.efimLeft); }
     // Вера
     if (stayed === 'vera') { lines.push(W.veraStay); below++; }
     else if (vera.state === 'exit') { lines.push(W.veraOut); out++; }
-    else { below++; if (f.has('veraWait')) lines.push(W.veraWait); else if (f.has('veraLeft')) lines.push(W.veraLeft); }
+    else if (campOut(vera)) out++;
+    else { below++; if (f.has('veraLost')) lines.push(W.veraLost); else if (f.has('veraWait')) lines.push(W.veraWait); else if (f.has('veraLeft')) lines.push(W.veraLeft); }
     // Мила
     const adultOut = efim.state === 'exit' || vera.state === 'exit';
-    if (m.state === 'vera') { lines.push(W.milaOutVera); out++; }
+    if (m.state === 'vera') { if (vera.state === 'exit') { lines.push(W.milaOutVera); out++; } else if (campOut(vera)) out++; else below++; }
+    else if (f.has('milaLostVera')) { lines.push(W.milaLostVera); below++; }
     else if (m.state === 'carried' && (heroOut || adultOut)) { lines.push(heroOut ? W.milaOut : W.milaOutVera.replace('у матери', 'у чужих людей')); out++; }
     else if (m.state === 'carried') { lines.push(W.milaStay); below++; }
     else { below++; if (m.state === 'lost' || m.state === 'down') lines.push(W.milaLost); else if (f.has('milaLeft')) lines.push(W.milaLeft); }
     // семья
     if (g.family.state === 'fire') { if (beacon) { lines.push(W.familyOut); out += 4; } else { lines.push(W.familyFire); below += 4; } }
     else if (g.family.state === 'boy') {
-      if (boy.state === 'exit') { lines.push(W.boyOut); out++; } else below++;
+      if (boy.state === 'exit') { lines.push(W.boyOut); out++; } else if (campOut(boy)) out++; else { below++; if (f.has('boyLost')) lines.push(W.boyLost); }
       lines.push(W.familyLeftBoy); below += 3;
     } else { below += 4; if (f.has('familyLeft')) lines.push(W.familyLeft); }
     // тень

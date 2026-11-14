@@ -28,6 +28,21 @@ html, body { margin: 0; height: 100%; background: var(--void); overflow: hidden;
 #oil.low i { background: var(--ember); animation: pulse 0.9s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.35; } }
 
+/* цель: всегда наверху */
+#goal { top: max(14px, env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; white-space: nowrap;
+  font-family: var(--display); font-weight: 700; font-size: clamp(19px, 2.4vw, 24px); letter-spacing: 0.14em; color: var(--bone-mid); text-shadow: 0 0 10px var(--void), 0 0 3px var(--void); }
+#goal span b { color: var(--bone-hi); font-weight: 700; }
+#goal span u { text-decoration: none; color: var(--ember); }
+#goal i { width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 18px solid var(--bone-hi); filter: drop-shadow(0 0 6px rgba(243, 234, 214, 0.5)); transition: transform 0.4s; }
+/* метки направления */
+.mark { transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 3px; pointer-events: none;
+  font-family: var(--display); font-weight: 700; font-size: 20px; letter-spacing: 0.16em; color: var(--bone-mid); text-shadow: 0 0 8px var(--void), 0 0 3px var(--void); animation: markin 0.4s ease-out; }
+.mark i { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 12px solid var(--bone-mid); opacity: 0; }
+.mark.off i { opacity: 1; }
+.mark.urgent { color: var(--ember); font-size: 26px; animation: pulse 0.5s ease-in-out infinite; }
+.mark.urgent i { border-bottom-color: var(--ember); }
+@keyframes markin { from { opacity: 0; } }
+
 /* фитиль: ползунок у правого края */
 #wick { right: max(6px, env(safe-area-inset-right, 0px)); top: 50%; transform: translateY(-50%); width: 52px; height: min(40vh, 250px);
   pointer-events: auto; touch-action: none; cursor: ns-resize; display: flex; flex-direction: column; justify-content: space-between; align-items: center;
@@ -37,7 +52,7 @@ html, body { margin: 0; height: 100%; background: var(--void); overflow: hidden;
   background: rgba(233, 223, 198, 0.16); box-shadow: 0 0 12px rgba(243, 234, 214, 0.35); }
 #wick.locked { opacity: 0.25; pointer-events: none; }
 
-#hint { top: max(11%, calc(env(safe-area-inset-top, 0px) + 56px)); left: 50%; transform: translateX(-50%); width: min(78vw, 640px); text-align: center;
+#hint { top: max(13%, calc(env(safe-area-inset-top, 0px) + 78px)); left: 50%; transform: translateX(-50%); width: min(78vw, 640px); text-align: center;
   font-size: clamp(17px, 2.3vw, 22px); line-height: 1.45; color: var(--bone-mid); text-shadow: 0 0 12px var(--void), 0 0 3px var(--void); }
 
 /* действие — всегда явная кнопка */

@@ -25,6 +25,8 @@ export class Darkness {
   readonly hunters: Hunter[] = [];
   private rng = mulberry32(99);
   private soundT = 4;
+  /** Языки, которые задаёт игра на один кадр (тьма тащит отставшего): x, z, ширина, сила. */
+  readonly extra: { x: number; z: number; w: number; s: number }[] = [];
   /** 0..1 — как близко ближайший язык тьмы (для звука и давления) */
   nearness = 0;
   nearestAngle = 0;
@@ -86,6 +88,8 @@ export class Darkness {
     let touched: Hunter | null = null;
     let near = 0, tn = 0;
     const tend = darkU.uTendrils.value;
+    for (const e of this.extra) if (tn < TEND_MAX) tend[tn++].set(e.x, e.z, e.w, e.s);
+    this.extra.length = 0;
 
     for (const h of this.hunters) {
       const dx = h.x - w.px, dz = h.z - w.pz;

@@ -28,8 +28,12 @@ export type Mode = 'menu' | 'intro' | 'play' | 'dead' | 'end';
 export type NpcId = 'efim' | 'vera' | 'boy';
 export interface Npc {
   id: NpcId; h: Human; x: number; z: number; dir: number; speed01: number;
-  state: 'wait' | 'follow' | 'left' | 'walkoff' | 'gone' | 'exit' | 'stay';
+  state: 'wait' | 'follow' | 'left' | 'walkoff' | 'gone' | 'exit' | 'stay' | 'camp' | 'crawl';
   candle: Candle | null; path: [number, number][]; load: number;
+  out: number;                      // сколько секунд вне света
+  grab: number;                     // 0..1 — насколько тьма уже утащила
+  pace: number;                     // доля от обычной скорости (Ефим хромает)
+  goal: { x: number; z: number } | null;   // куда идёт сам: огонь, у которого ждёт, или лаз
 }
 export interface Prompt { text: string; d: number; x: number; z: number; act: () => void }
 interface Timer { t: number; fn: () => void }
@@ -63,6 +67,10 @@ export class Game {
   // заплутавшая тень
   readonly shade: { v: Spirit; x: number; z: number; state: 'wait' | 'follow' | 'left' | 'gone'; isTrue: boolean; hurt: number; warned: boolean };
   readonly toy: { g: Group; x: number; z: number; taken: boolean };
+  // лазы: пролезет только ребёнок
+  readonly holes: { x: number; z: number; done: boolean; busy: boolean }[] = [];
+  /** живые огни этого кадра: рядом с ними тьма не трогает */
+  safeLights: SafeLight[] = [];
   mode: Mode = 'menu';
   radius = 2.3;                 // сглаженный радиус круга света
   gateOpen = 0;                 // к чему стремятся Врата
@@ -87,6 +95,7 @@ export class Game {
   private stood = false;
   private pressure = 0.5;
   private still = 0;            // сколько секунд герой стоит
+  private actLock = 0;          // пауза для кнопки действия после разговора
   private stillHinted = false;
   private drift = { x: 0, z: 0, dx: 0, dz: 0 };
   private flow = [0, 0];
@@ -139,7 +148,7 @@ export class Game {
       const [x, z] = snap(at);
       h.root.position.set(x, 0, z);
       scene.add(h.root);
-      return { id, h, x, z, dir: 0, speed01: 0, state: 'wait', candle: null, path, load };
+      return { id, h, x, z, dir: 0, speed01: 0, state: 'wait', candle: null, path, load, out: 0, grab: 0, pace: id === 'efim' ? T.party.efimPace : 1, goal: null };
     };
     const camp = (at: [number, number], seed: number): [Fire, number, number] => {
       const f = new Fire(style, 'campfire', seed);
@@ -212,6 +221,20 @@ export class Game {
       g.position.set(x, 0, z);
       scene.add(g);
       this.toy = { g, x, z, taken: false };
+    }
+
+    // лазы: кольцо камней вокруг чёрной дыры, в глубине блестит масло
+    for (const p of def.holes) {
+      const [x, z] = snap(p, 0.35);
+      const g = new Group();
+      const pit = new Mesh(new SphereGeometry(0.42, 10, 6), new MeshBasicMaterial({ color: 0x000000 }));
+      pit.scale.set(1, 0.12, 0.8); pit.position.y = 0.06;
+      const glint = makeGlow(style.lamp, 0.35, 0.22);
+      glint.position.y = 0.1;
+      g.add(pit, glint);
+      g.position.set(x, 0, z);
+      scene.add(g);
+      this.holes.push({ x, z, done: false, busy: false });
     }
 
     // Врата и чаша
@@ -340,12 +363,19 @@ export class Game {
       return d;
     };
     const gp = this.gate.group.position;
-    this.companions.forEach((n, i) => {
-      if (n.state === 'exit') { walkTo(n, gp.x + 1.2, gp.z + 1.2, T.player.speed * 0.7); return; }
-      if (n.state === 'stay') { walkTo(n, this.bowl.x + 1.0, this.bowl.z + 0.4, T.player.speed * 0.6); return; }
-      const [tx, tz] = this.trail(1.5 * (i + 1));
-      if (this.dist(n.x, n.z) > 1.3 * (i + 1)) walkTo(n, tx, tz, T.player.speed * 1.1); else n.speed01 = 0;
-    });
+    let k = 0;                      // место в цепочке
+    for (const n of this.companions) {
+      if (n.state === 'exit') { walkTo(n, gp.x + 1.2, gp.z + 1.2, T.player.speed * 0.7); continue; }
+      if (n.state === 'stay') { walkTo(n, this.bowl.x + 1.0, this.bowl.z + 0.4, T.player.speed * 0.6); continue; }
+      if ((n.state === 'camp' || n.state === 'crawl') && n.goal) { walkTo(n, n.goal.x, n.goal.z, T.player.speed * 0.9); continue; }
+      if (n.state !== 'follow') continue;
+      k++;
+      if (n.grab > 0.03 && n.out > 0) { n.speed01 = 0; continue; }          // тьма держит: сам не выйдет
+      const kind = this.grid.kindAt(n.x, n.z);
+      const slow = n.pace * (kind === 'water' ? T.party.wade : kind === 'fissure' ? T.party.squeeze : 1);
+      const [tx, tz] = this.trail(T.party.spacing * k);
+      if (this.dist(n.x, n.z) > 1.25 * k) walkTo(n, tx, tz, T.player.speed * 1.06 * slow); else n.speed01 = 0;
+    }
     const v = this.npcs.vera;
     if (v.state === 'walkoff') {
       const [tx, tz] = v.path[0] ?? [v.x, v.z];
@@ -380,6 +410,26 @@ export class Game {
     }
   }
 
+  /** Отряд и свет: кто выпал из круга дольше грейса — того тьма тащит; вернул свет — отпускает. */
+  private party(dt: number): void {
+    for (const n of this.companions) {
+      if (n.state !== 'follow') { n.out = 0; n.grab = 0; continue; }
+      const lit = this.dist(n.x, n.z) < this.radius * 0.95 || this.safeLights.some((s) => Math.hypot(s.x - n.x, s.z - n.z) < s.r);
+      if (lit) {
+        if (n.grab > 0.25 && n.out > 0) this.story.freed(n);
+        n.out = 0; n.grab = Math.max(0, n.grab - dt * 0.8);
+        continue;
+      }
+      n.out += dt;
+      if (n.out < T.party.grace) continue;
+      if (n.grab === 0) this.story.grabbed(n);
+      n.grab += dt / T.party.grabTime;
+      this.dark.extra.push({ x: n.x, z: n.z, w: 1.5, s: Math.min(1, 0.45 + n.grab) });
+      this.hud.marker(`grab-${n.id}`, n.x, n.z, `${this.story.who(n)}: ${TX.grab[n.id]}`, 0.4, true);
+      if (n.grab >= 1) this.story.taken(n);
+    }
+  }
+
   private interact(): void {
     const hit = this.input.hit('Space', 'Enter', 'KeyF');
     const list: Prompt[] = [];
@@ -397,11 +447,20 @@ export class Game {
       if (this.shade.state === 'wait') near(this.shade.x, this.shade.z, 3.4, TX.promptTalk, () => s.talkShade());
       if (!this.toy.taken) near(this.toy.x, this.toy.z, 1.3, TX.promptToy, () => s.pickToy());
       near(this.bowl.x, this.bowl.z, 1.9, TX.bowl.prompt, () => s.bowl());
+      const followers = this.companions.some((c) => c.state === 'follow');
+      const fires: [Fire, number, number][] = [[this.family.fire, this.family.x, this.family.z], ...this.braziers.map((b): [Fire, number, number] => [b.f, b.x, b.z])];
+      for (const [fr, fx, fz] of fires) {
+        if (!fr.lit) continue;
+        if (followers) near(fx, fz, 2.7, TX.camp.leave, () => s.camp(fx, fz));
+        else if (this.companions.some((c) => c.state === 'camp' && c.goal && Math.hypot(c.goal.x - fx, c.goal.z - fz) < 3)) near(fx, fz, 2.7, TX.camp.call, () => s.uncamp(fx, fz));
+      }
+      for (const h of this.holes) if (!h.done && !h.busy) near(h.x, h.z, 1.7, n.boy.state === 'follow' ? TX.hole.send : TX.hole.look, () => s.hole(h));
       if (this.carrying && !list.length) list.push({ text: TX.mila.promptDown, d: 9, x: this.pos.x + this.face.x, z: this.pos.z + this.face.z, act: () => s.dropMila() });
     }
     list.sort((p, q) => p.d - q.d);
     this.hud.prompt(list[0]?.text ?? null);
-    if (hit && list[0]) { this.lookAt = { x: list[0].x, z: list[0].z }; list[0].act(); }
+    // сразу после разговора действие не срабатывает: иначе, пролистывая реплики, жмёшь следующую кнопку вслепую
+    if (hit && list[0] && this.actLock <= 0) { this.lookAt = { x: list[0].x, z: list[0].z }; list[0].act(); }
     // масло подбирается само: в панике не до кнопок
     for (const f of this.flasks) {
       if (f.taken || !this.lamp.held || this.dist(f.x, f.z) > 0.95) continue;
@@ -427,6 +486,7 @@ export class Game {
     for (let i = this.timers.length - 1; i >= 0; i--) { const tm = this.timers[i]; tm.t -= dt; if (tm.t <= 0) { this.timers.splice(i, 1); tm.fn(); } }
 
     const talking = hud.busy;
+    this.actLock = talking ? 0.7 : Math.max(0, this.actLock - dt);
     const live = this.mode === 'play' && !talking && !this.frozen;
     this.move(dt);
     this.moveNpcs(dt, t);
@@ -451,7 +511,7 @@ export class Game {
     this.lantern.update(t, power, this.radius, this.style.lampGain);
     this.lantern.group.getWorldPosition(this.lampWorld);
 
-    if (live) { this.interact(); this.story.zones(); this.story.wisps(); this.story.drama(dt); } else hud.prompt(null);
+    if (live) { this.interact(); this.party(dt); this.story.zones(); this.story.wisps(); this.story.drama(dt); } else hud.prompt(null);
 
     // огни мира
     beginDarkLights(); this.pool.begin();
@@ -490,6 +550,7 @@ export class Game {
     if (!this.toy.taken && this.dist(this.toy.x, this.toy.z) < 22) addDarkLight(this.toy.x, 0.2, this.toy.z, 0.6);
     if (this.mila.state === 'wait' || this.mila.state === 'left') addDarkLight(this.mila.x + 0.45, 0.2, this.mila.z + 0.3, 0.9);
     if (this.family.fire.k < 0.5 && this.dist(this.family.x, this.family.z) < 22) addDarkLight(this.family.x, 0.3, this.family.z, 0.8);
+    this.safeLights = safe;
     commitDarkLights(this.pos.x, this.pos.z);
     this.pool.commit(this.pos.x, this.pos.z);
     // свет на дыме: лампа и ближайшие живые огни
@@ -558,6 +619,12 @@ export class Game {
     this.drift.dx = damp(this.drift.dx, this.flow[0], 1.2, dt); this.drift.dz = damp(this.drift.dz, this.flow[1], 1.2, dt);
     this.drift.x += this.drift.dx * 0.55 * dt; this.drift.z += this.drift.dz * 0.55 * dt;
     this.dust.update(t, this.lampWorld, this.radius, power, S.mobile ? 2.2 : 2.4 * S.renderer.getPixelRatio(), this.drift.x, this.drift.z);
+    if (this.flags.has('goal') && this.mode === 'play') {
+      const c = this.story.tally(), steps = this.grid.flowAt(this.pos.x, this.pos.z);
+      const sx = this.drift.dx * S.right.x + this.drift.dz * S.right.z, sy = this.drift.dx * S.up.x + this.drift.dz * S.up.z;
+      hud.setGoal(`${TX.goal.with} <b>${c.with}</b> · ${TX.goal.found} <b>${c.found}/7</b>${c.lost ? ` · ${TX.goal.lost} <u>${c.lost}</u>` : ''} · ${TX.goal.gate} <b>${steps < 65535 ? Math.round(steps / 5) * 5 : '?'}</b>`, Math.hypot(sx, sy) > 0.2 ? Math.atan2(sx, sy) : null);
+    }
+    hud.updateMarkers((x, z) => { _v.set(x, 1, z).project(S.camera); return [(_v.x * 0.5 + 0.5) * innerWidth, (1 - (_v.y * 0.5 + 0.5)) * innerHeight]; });
     hud.setOil(lamp.oil, lamp.oil <= T.lamp.lowOil);
     hud.setWick((lamp.wick - T.lamp.wickMin) / (T.lamp.wickMax - T.lamp.wickMin), this.carrying);
     window.__metrics = { mode: this.mode, oil: Math.round(lamp.oil), wick: +lamp.wick.toFixed(2), x: +this.pos.x.toFixed(1), z: +this.pos.z.toFixed(1), companions: this.companions.length, flags: [...this.flags] };

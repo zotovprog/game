@@ -25,6 +25,10 @@ export class Hud {
   private opts = el('div', '', 'opts');
   private wick = el('div', 'wick', 'fade hidden');
   private wickKnob = el('i');
+  private goal = el('div', 'goal', 'fade hidden');
+  private goalText = el('span');
+  private goalArrow = el('i');
+  private marks = new Map<string, { el: HTMLElement; x: number; z: number; until: number }>();
   private overlay: HTMLElement | null = null;
   private hintTimer = 0;
   private queue: string[] = [];
@@ -47,7 +51,8 @@ export class Hud {
     pauseBtn.textContent = '‖';
     pauseBtn.setAttribute('aria-label', TX.paused);
     pauseBtn.addEventListener('click', () => this.onPause?.());
-    root.append(this.area, this.mark, this.oil, this.hintEl, this.wick, this.dialog, this.act, pauseBtn);
+    this.goal.append(this.goalText, this.goalArrow);
+    root.append(this.area, this.mark, this.oil, this.goal, this.hintEl, this.wick, this.dialog, this.act, pauseBtn);
     this.act.addEventListener('click', () => this.input.press('Space'));
     this.dialog.addEventListener('pointerdown', (e) => { if (!(e.target as HTMLElement).closest('button')) this.input.press('Space'); });
     // ползунок фитиля: тянуть вверх — ярче
@@ -65,7 +70,42 @@ export class Hud {
   /** Открыт ли диалог или выбор. */
   get busy(): boolean { return this.onDone !== null || this.onChoice !== null; }
 
-  showHud(on: boolean): void { this.oil.classList.toggle('hidden', !on); this.wick.classList.toggle('hidden', !on); }
+  showHud(on: boolean): void { this.oil.classList.toggle('hidden', !on); this.wick.classList.toggle('hidden', !on); if (!on) this.goal.classList.add('hidden'); }
+  /** Цель и прогресс: всегда на экране. angle — куда тянет сквозняк (рад, 0 — вверх экрана), null — нет стрелки. */
+  setGoal(html: string, angle: number | null): void {
+    if (this.goalText.innerHTML !== html) this.goalText.innerHTML = html;
+    this.goalArrow.style.display = angle === null ? 'none' : '';
+    if (angle !== null) this.goalArrow.style.transform = `rotate(${angle.toFixed(2)}rad)`;
+    this.goal.classList.remove('hidden');
+  }
+  /** Метка на краю экрана (или над целью, если она в кадре): «голос», «масло», имя того, кого тащит тьма. */
+  marker(id: string, x: number, z: number, label: string, secs: number, urgent = false): void {
+    let m = this.marks.get(id);
+    if (!m) {
+      const e = el('div', '', 'mark');
+      e.innerHTML = '<i></i><b></b>';
+      this.root.append(e);
+      m = { el: e, x, z, until: 0 };
+      this.marks.set(id, m);
+    }
+    m.x = x; m.z = z; m.until = performance.now() + secs * 1000;
+    m.el.classList.toggle('urgent', urgent);
+    (m.el.lastChild as HTMLElement).textContent = label;
+  }
+  dropMarker(id: string): void { const m = this.marks.get(id); if (m) { m.el.remove(); this.marks.delete(id); } }
+  /** project: мир → экран в пикселях. */
+  updateMarkers(project: (x: number, z: number) => [number, number]): void {
+    const now = performance.now(), W = innerWidth, H = innerHeight, pad = 54;
+    for (const [id, m] of this.marks) {
+      if (now > m.until) { this.dropMarker(id); continue; }
+      const [sx, sy] = project(m.x, m.z);
+      const cx = Math.min(W - pad, Math.max(pad, sx)), cy = Math.min(H - pad - 30, Math.max(pad + 40, sy - 70));
+      const off = sx < 0 || sx > W || sy < 0 || sy > H;
+      m.el.style.left = `${cx}px`; m.el.style.top = `${cy}px`;
+      m.el.classList.toggle('off', off);
+      (m.el.firstChild as HTMLElement).style.transform = `rotate(${Math.atan2(sx - cx, -(sy - cy)).toFixed(2)}rad)`;
+    }
+  }
   setOil(oil: number, low: boolean): void {
     this.oilFill.style.height = `${Math.max(0, Math.min(100, oil)) * 0.96}%`;
     this.oil.classList.toggle('low', low);

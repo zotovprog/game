@@ -18,6 +18,7 @@ export interface LevelDef {
   shade: { at: P };
   toy: { at: P };
   gate: { at: P; bowl: P };
+  holes: P[];                                   // лазы: взрослому не пролезть, внутри масло
   rails: P[][];
   cart: P;
   zones: { id: string; at: P; r: number }[];
@@ -87,6 +88,7 @@ export const DEPTH1: LevelDef = {
   shade: { at: [70.4, 167.2] },
   toy: { at: [172.4, 156.6] },
   gate: { at: [23.8, 29.8], bowl: [27.4, 33.4] },
+  holes: [[168.6, 162.4], [137.5, 131.5], [113, 79.5], [64, 143.5]],
   rails: [[[168, 187.5], [160, 182.6], [148, 178.4], [140, 174.4], [133, 173]]],
   cart: [162.5, 180.5],
   zones: [
