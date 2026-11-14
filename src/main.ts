@@ -1,3 +1,7 @@
+import '@fontsource/amatic-sc/cyrillic-700.css';
+import '@fontsource/amatic-sc/latin-700.css';
+import '@fontsource/neucha/cyrillic-400.css';
+import '@fontsource/neucha/latin-400.css';
 import { Mesh, Points, Sprite } from 'three';
 import { Sfx } from './audio/sfx';
 import { Input } from './core/input';
@@ -68,7 +72,7 @@ function tp(x: number, z: number): void {
 
 let last = performance.now(), t = 0, frames = 0, fps = 60;
 function frame(now: number): void {
-  const dt = Math.min((now - last) / 1000, 0.1);
+  const dt = Math.min(Math.max((now - last) / 1000, 0), 0.1);   // первый кадр после долгой сборки может прийти «из прошлого»
   last = now; t += dt;
   fps += (1 / Math.max(dt, 0.001) - fps) * 0.05;
   game.update(dt, t);

@@ -271,6 +271,7 @@ export class Story {
   private reunion(): void {
     const g = this.g, tx = TX.vera;
     g.flags.add('reunion'); g.flags.add('milaMet'); g.flags.add('milaName'); g.flags.add('milaSaved');
+    g.lookAt = { x: g.mila.x, z: g.mila.z };
     g.sfx.voice('vera');
     g.hud.say(tx.realName, [tx.reunion[0]], () => {
       g.sfx.voice('mila');
@@ -406,6 +407,7 @@ export class Story {
     }
     if (this.ownGhost && !g.flags.has('ownGhost') && g.dist(this.ownGhost.x, this.ownGhost.z) < g.radius + 0.5) {
       g.flags.add('ownGhost');
+      g.lookAt = { ...this.ownGhost };
       g.sfx.whisper(0, 0.1);
       g.hud.say('', TX.ownGhost, () => {});
     }

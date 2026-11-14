@@ -1,9 +1,11 @@
 /* Вёрстка: игра на весь экран; интерфейс — только текст поверх черноты, без панелей (арт-библия). */
 :root { color-scheme: dark;
   --void: #000; --bone: #d8cbb4; --bone-hi: #e9dfc6; --bone-mid: #b9ad98; --ash: #8f8573; --ash-lo: #6d6558; --whisper: #8a8a90; --ember: #ff8a3a;
-  --line: rgba(216, 203, 180, 0.3); --serif: 'Old Standard TT', Georgia, 'Times New Roman', serif; }
+  --line: rgba(216, 203, 180, 0.3);
+  /* шрифты: Amatic SC — процарапанные заглавные (заголовки, имена, кнопки, шёпот); Neucha — рукописный текст */
+  --display: 'Amatic SC', 'Neucha', 'Segoe Print', cursive; --text: 'Neucha', 'Segoe Print', 'Comic Sans MS', cursive; }
 html, body { margin: 0; height: 100%; background: var(--void); overflow: hidden; color: var(--bone);
-  font-family: var(--serif); -webkit-user-select: none; user-select: none;
+  font-family: var(--text); -webkit-user-select: none; user-select: none;
   -webkit-touch-callout: none; touch-action: none; -webkit-tap-highlight-color: transparent; }
 #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 #ui { position: fixed; inset: 0; pointer-events: none; }
@@ -35,30 +37,30 @@ html, body { margin: 0; height: 100%; background: var(--void); overflow: hidden;
   background: rgba(233, 223, 198, 0.16); box-shadow: 0 0 12px rgba(243, 234, 214, 0.35); }
 #wick.locked { opacity: 0.25; pointer-events: none; }
 
-#hint { top: max(11%, calc(env(safe-area-inset-top, 0px) + 56px)); left: 50%; transform: translateX(-50%); width: min(78vw, 640px); text-align: center; font-style: italic;
-  font-size: clamp(15px, 2.1vw, 20px); line-height: 1.5; color: var(--bone-mid); text-shadow: 0 0 12px var(--void), 0 0 3px var(--void); }
+#hint { top: max(11%, calc(env(safe-area-inset-top, 0px) + 56px)); left: 50%; transform: translateX(-50%); width: min(78vw, 640px); text-align: center;
+  font-size: clamp(17px, 2.3vw, 22px); line-height: 1.45; color: var(--bone-mid); text-shadow: 0 0 12px var(--void), 0 0 3px var(--void); }
 
 /* действие — всегда явная кнопка */
-#act { left: 50%; bottom: max(13%, calc(env(safe-area-inset-bottom, 0px) + 30px)); transform: translateX(-50%); font: inherit; font-size: clamp(16px, 2vw, 19px);
-  letter-spacing: 0.04em; color: var(--bone-hi); background: rgba(0, 0, 0, 0.6); border: 1px solid var(--bone-mid); padding: 13px 26px; cursor: pointer;
+#act { left: 50%; bottom: max(13%, calc(env(safe-area-inset-bottom, 0px) + 30px)); transform: translateX(-50%); font-family: var(--display); font-weight: 700; font-size: clamp(24px, 3vw, 30px);
+  letter-spacing: 0.12em; color: var(--bone-hi); background: rgba(0, 0, 0, 0.6); border: 1px solid var(--bone-mid); padding: 13px 26px; cursor: pointer;
   pointer-events: auto; white-space: nowrap; box-shadow: 0 0 22px rgba(243, 234, 214, 0.12); transition: opacity 0.25s, background 0.2s; }
 #act:hover, #act:active { background: rgba(60, 54, 44, 0.7); }
-#act kbd { font-family: inherit; font-size: 0.78em; border: 1px solid var(--line); border-radius: 3px; padding: 1px 7px; margin-right: 10px; color: var(--bone-mid); }
+#act kbd { font-family: var(--text); font-weight: 400; letter-spacing: 0; font-size: 0.6em; vertical-align: middle; border: 1px solid var(--line); border-radius: 3px; padding: 1px 7px; margin-right: 10px; color: var(--bone-mid); }
 
 #dialog { left: 50%; bottom: max(6%, calc(env(safe-area-inset-bottom, 0px) + 18px)); transform: translateX(-50%); width: min(88vw, 680px); text-align: center; pointer-events: auto; }
-#dialog .who { font-size: 13px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--ember); opacity: 0.8; margin-bottom: 8px; min-height: 16px; }
-#dialog .txt { font-size: clamp(17px, 2.4vw, 23px); line-height: 1.5; text-shadow: 0 0 14px var(--void), 0 0 4px var(--void); min-height: 2.9em; }
+#dialog .who { font-family: var(--display); font-weight: 700; font-size: 21px; letter-spacing: 0.34em; text-transform: uppercase; color: var(--ember); opacity: 0.8; margin-bottom: 8px; min-height: 16px; }
+#dialog .txt { font-size: clamp(19px, 2.6vw, 25px); line-height: 1.4; text-shadow: 0 0 14px var(--void), 0 0 4px var(--void); min-height: 2.9em; }
 #dialog .txt.in { animation: linein 0.5s ease-out; }
 @keyframes linein { from { opacity: 0; transform: translateY(6px); } }
 #dialog .opts { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; align-items: center; }
 #dialog button, .overlay button { font: inherit; color: var(--bone-hi); background: rgba(0, 0, 0, 0.62); border: 1px solid var(--line);
-  padding: 12px 20px; cursor: pointer; pointer-events: auto; width: min(86vw, 460px); transition: border-color 0.2s, background 0.2s; font-size: clamp(15px, 2vw, 18px);
+  padding: 12px 20px; cursor: pointer; pointer-events: auto; width: min(86vw, 460px); transition: border-color 0.2s, background 0.2s; font-size: clamp(17px, 2.2vw, 20px);
   display: flex; align-items: baseline; justify-content: center; gap: 10px; text-align: center; }
 #dialog button:hover, #dialog button:active, .overlay button:hover { border-color: var(--bone-hi); background: rgba(40, 36, 30, 0.7); }
-#dialog button small { display: block; font-size: 0.72em; color: var(--ash); margin-top: 3px; font-style: italic; }
+#dialog button small { display: block; font-size: 0.78em; color: var(--ash); margin-top: 2px; }
 #dialog button kbd { font-family: inherit; color: var(--ash); }
 
-.whisper { font-style: italic; font-size: clamp(14px, 1.8vw, 18px); color: var(--whisper); letter-spacing: 0.12em; opacity: 0;
+.whisper { font-family: var(--display); font-weight: 700; font-size: clamp(22px, 2.8vw, 30px); color: var(--whisper); letter-spacing: 0.16em; opacity: 0;
   animation: whisper 5s ease-in-out forwards; text-shadow: 0 0 8px var(--void); white-space: nowrap; }
 @keyframes whisper { 15% { opacity: 0.55; } 70% { opacity: 0.4; } 100% { opacity: 0; transform: translateY(-14px); letter-spacing: 0.3em; } }
 
@@ -70,14 +72,14 @@ html, body { margin: 0; height: 100%; background: var(--void); overflow: hidden;
 .overlay { inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
   background: rgba(0, 0, 0, 0.0); pointer-events: auto; padding: 24px; box-sizing: border-box; overflow-y: auto; }
 .overlay.black { background: var(--void); }
-.overlay h1 { font-weight: normal; font-size: clamp(30px, 6.4vw, 72px); letter-spacing: 0.32em; margin: 0 0 0 0.32em; color: var(--bone-hi);
+.overlay h1 { font-family: var(--display); font-weight: 700; font-size: clamp(46px, 9.4vw, 108px); line-height: 1.05; letter-spacing: 0.2em; margin: 0 0 0 0.2em; color: var(--bone-hi);
   text-shadow: 0 0 40px rgba(243, 234, 214, 0.25); }
-.overlay h2 { font-weight: normal; font-size: 13px; letter-spacing: 0.5em; text-transform: uppercase; color: var(--ash); margin: 18px 0 34px 0.5em; }
-.overlay p { font-size: clamp(15px, 2vw, 20px); line-height: 1.6; margin: 0 0 9px; max-width: 640px; opacity: 0; transition: opacity 1.6s; }
+.overlay h2 { font-family: var(--display); font-weight: 700; font-size: 21px; letter-spacing: 0.5em; text-transform: uppercase; color: var(--ash); margin: 18px 0 34px 0.5em; }
+.overlay p { font-size: clamp(17px, 2.2vw, 22px); line-height: 1.45; margin: 0 0 9px; max-width: 640px; opacity: 0; transition: opacity 1.6s; }
 .overlay p.on { opacity: 1; }
-.overlay .small { font-size: 13px; color: var(--ash); margin-top: 26px; line-height: 1.8; letter-spacing: 0.04em; }
-.overlay button { width: auto; min-width: 220px; letter-spacing: 0.2em; margin-top: 18px; }
-.overlay .mem { color: var(--ember); letter-spacing: 0.3em; font-size: 13px; text-transform: uppercase; margin-top: 22px; }
+.overlay .small { font-size: 15px; color: var(--ash); margin-top: 26px; line-height: 1.8; letter-spacing: 0.04em; }
+.overlay button { width: auto; min-width: 220px; font-family: var(--display); font-weight: 700; font-size: clamp(26px, 3.2vw, 32px); letter-spacing: 0.2em; padding: 8px 30px; margin-top: 18px; }
+.overlay .mem { font-family: var(--display); font-weight: 700; color: var(--ember); letter-spacing: 0.3em; font-size: 22px; text-transform: uppercase; margin-top: 22px; }
 
 body.touch #act kbd, body.touch #dialog button kbd { display: none; }
 body.touch #act { padding: 16px 30px; }

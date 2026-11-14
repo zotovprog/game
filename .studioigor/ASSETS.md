@@ -21,3 +21,5 @@
 ## License registry
 | asset / pack | source (URL) | license | author | path | attribution |
 |---|---|---|---|---|---|
+| Amatic SC (шрифт) | https://fonts.google.com/specimen/Amatic+SC · npm @fontsource/amatic-sc | OFL-1.1 | Vernon Adams, Ben Nathan, Thomas Jockin | node_modules/@fontsource/amatic-sc → dist/assets | в титрах: «Amatic SC — The Amatic SC Project Authors, SIL OFL 1.1» |
+| Neucha (шрифт) | https://fonts.google.com/specimen/Neucha · npm @fontsource/neucha | OFL-1.1 | Jovanny Lemonad | node_modules/@fontsource/neucha → dist/assets | в титрах: «Neucha — Jovanny Lemonad, SIL OFL 1.1» |

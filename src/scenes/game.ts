@@ -31,7 +31,7 @@ export interface Npc {
   state: 'wait' | 'follow' | 'left' | 'walkoff' | 'gone' | 'exit' | 'stay';
   candle: Candle | null; path: [number, number][]; load: number;
 }
-export interface Prompt { text: string; d: number; act: () => void }
+export interface Prompt { text: string; d: number; x: number; z: number; act: () => void }
 interface Timer { t: number; fn: () => void }
 
 export class Game {
@@ -70,6 +70,9 @@ export class Game {
   chroma = 0;
   frozen = false;               // сцена: герой не управляется
   autoWalk: { x: number; z: number } | null = null;
+  /** К чему повёрнут герой, пока им нельзя управлять (разговор, сцена). */
+  lookAt: { x: number; z: number } | null = null;
+  private yaw = 2.4;
   beacon: { glow: Sprite; color: number } | null = null;
   private dust: Dust;
   private campfire: Fire;
@@ -304,7 +307,14 @@ export class Game {
     } else this.still += dt;
     this.speed01 = l;
     this.hero.root.position.x = this.pos.x; this.hero.root.position.z = this.pos.z;
-    if (this.stood) this.hero.root.rotation.y = Math.atan2(this.face.x, this.face.z);
+    // пока героем нельзя управлять, он повёрнут к собеседнику; отпустило — разворачивается обратно:
+    // по этому развороту видно, что снова можно идти
+    const held = (this.hud.busy || this.frozen) && !this.autoWalk;
+    if (!held) this.lookAt = null;
+    const want = this.lookAt ? Math.atan2(this.lookAt.x - this.pos.x, this.lookAt.z - this.pos.z) : Math.atan2(this.face.x, this.face.z);
+    const turn = Math.atan2(Math.sin(want - this.yaw), Math.cos(want - this.yaw));
+    this.yaw += turn * (1 - Math.exp(-(this.lookAt ? 6 : l > 0.01 ? 14 : 8) * dt));
+    if (this.stood) this.hero.root.rotation.y = this.yaw;
   }
 
   /** Точка на следе героя в need метрах позади. */
@@ -373,7 +383,7 @@ export class Game {
   private interact(): void {
     const hit = this.input.hit('Space', 'Enter', 'KeyF');
     const list: Prompt[] = [];
-    const near = (x: number, z: number, r: number, text: string, act: () => void) => { const d = this.dist(x, z); if (d < r) list.push({ text, d, act }); };
+    const near = (x: number, z: number, r: number, text: string, act: () => void) => { const d = this.dist(x, z); if (d < r) list.push({ text, d, x, z, act }); };
     if (!this.lamp.held) near(this.lampOnGround.x, this.lampOnGround.z, 1.3, TX.promptLamp, () => this.story.pickLamp());
     else {
       const n = this.npcs, s = this.story;
@@ -387,11 +397,11 @@ export class Game {
       if (this.shade.state === 'wait') near(this.shade.x, this.shade.z, 3.4, TX.promptTalk, () => s.talkShade());
       if (!this.toy.taken) near(this.toy.x, this.toy.z, 1.3, TX.promptToy, () => s.pickToy());
       near(this.bowl.x, this.bowl.z, 1.9, TX.bowl.prompt, () => s.bowl());
-      if (this.carrying && !list.length) list.push({ text: TX.mila.promptDown, d: 9, act: () => s.dropMila() });
+      if (this.carrying && !list.length) list.push({ text: TX.mila.promptDown, d: 9, x: this.pos.x + this.face.x, z: this.pos.z + this.face.z, act: () => s.dropMila() });
     }
     list.sort((p, q) => p.d - q.d);
     this.hud.prompt(list[0]?.text ?? null);
-    if (hit && list[0]) list[0].act();
+    if (hit && list[0]) { this.lookAt = { x: list[0].x, z: list[0].z }; list[0].act(); }
     // масло подбирается само: в панике не до кнопок
     for (const f of this.flasks) {
       if (f.taken || !this.lamp.held || this.dist(f.x, f.z) > 0.95) continue;
