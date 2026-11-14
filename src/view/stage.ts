@@ -36,14 +36,14 @@ const GRADE = {
       // давление: тьма наползает с краёв кадра к лампе, край рваный и шевелится
       vec2 a = (uv - uCenter) * vec2(uRes.x / uRes.y, 1.0);
       float r = length(a);
-      float ang = atan(a.y, a.x);
-      float wob = n2(vec2(ang * 2.5, uTime * 0.25)) * 0.6 + n2(vec2(ang * 7.0 + 9.0, uTime * 0.5)) * 0.4;
+      vec2 dir = a / max(r, 0.0001);                               // вместо угла: у atan есть шов
+      float wob = n2(dir * 1.7 + vec2(uTime * 0.25, 3.0)) * 0.6 + n2(dir * 4.5 + vec2(9.0, uTime * 0.5)) * 0.4;
       // чернота не пустая: в ней течёт едва видимый дым — к лампе, к тебе
-      float s1 = n2(vec2(ang * 2.2 + sin(r * 5.0 - uTime * 0.4) * 0.6, r * 4.5 + uTime * 0.33));
-      float s2 = n2(a * 5.0 + vec2(uTime * 0.06, -uTime * 0.045));
+      float s1 = n2(dir * 2.4 + vec2(r * 4.5 + uTime * 0.33, -r * 3.0 - uTime * 0.21));
+      float s2 = n2(a * 7.0 + vec2(uTime * 0.07, -uTime * 0.05));
       float s3 = n2(a * 11.0 - vec2(uTime * 0.11, uTime * 0.08));
       float dark = 1.0 - smoothstep(0.0, 0.045, l);
-      col += vec3(0.055, 0.06, 0.07) * pow(s1 * s2 * 1.6, 2.2) * (0.6 + 0.8 * s3) * dark * uSmoke * (0.6 + uPressure);
+      col += vec3(0.04, 0.044, 0.052) * pow(s1 * s2 * 1.6, 2.6) * (0.5 + 1.0 * s3) * dark * uSmoke * (0.55 + uPressure);
       float inner = mix(0.95, 0.16, uPressure) + (wob - 0.5) * mix(0.1, 0.22, uPressure);
       float vig = smoothstep(inner, inner + mix(0.75, 0.3, uPressure), r);
       col *= 1.0 - vig * mix(uVignette, 1.0, uPressure);

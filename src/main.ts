@@ -44,8 +44,8 @@ function boot(autostart: boolean): void {
     dbg = mountDebug(ui, {
       '+20 масла': () => addOil(game.lamp, 20),
       'масло = 2': () => { game.lamp.oil = 2; },
-      ...Object.fromEntries(def.zones.map((z) => [`→ ${z.id}`, () => { game.pos.x = z.at[0] + 3; game.pos.z = z.at[1] + 3; }])),
-      ...Object.fromEntries(([['Ефим', def.efim.at], ['Вера', def.vera.at], ['семья', def.family.fire], ['Мила', def.mila.at], ['тень', def.shade.at], ['ботинок', def.toy.at], ['чаша', def.gate.bowl]] as [string, [number, number]][]).map(([n, p]) => [`→ ${n}`, () => { game.pos.x = p[0] + 2.5; game.pos.z = p[1] + 2.5; }])),
+      ...Object.fromEntries(def.zones.map((z) => [`→ ${z.id}`, () => tp(z.at[0] + 3, z.at[1] + 3)])),
+      ...Object.fromEntries(([['Ефим', def.efim.at], ['Вера', def.vera.at], ['семья', def.family.fire], ['Мила', def.mila.at], ['тень', def.shade.at], ['ботинок', def.toy.at], ['чаша', def.gate.bowl]] as [string, [number, number]][]).map(([n, p]) => [`→ ${n}`, () => tp(p[0] + 2.5, p[1] + 2.5)])),
     }, () => `fps ${fps.toFixed(0)} · ${JSON.stringify(window.__metrics)}`);
   }
   if (window.__GAME__) window.__GAME__.game = game;
@@ -59,6 +59,13 @@ addEventListener('pointerdown', wake, { once: true });
 addEventListener('keydown', wake, { once: true });
 document.addEventListener('visibilitychange', () => { if (document.hidden) game.pause(true); });
 
+/** Телепорт для отладки и автопрогонов: спутники и тень переносятся вместе с героем. */
+function tp(x: number, z: number): void {
+  game.pos.x = x; game.pos.z = z;
+  game.companions.forEach((n, i) => { if (n.state === 'follow') { n.x = x + 0.8 + i * 0.5; n.z = z + 0.8; } });
+  if (game.shade.state === 'follow') { game.shade.x = x + 2; game.shade.z = z + 2; }
+}
+
 let last = performance.now(), t = 0, frames = 0, fps = 60;
 function frame(now: number): void {
   const dt = Math.min((now - last) / 1000, 0.1);
@@ -66,7 +73,7 @@ function frame(now: number): void {
   fps += (1 / Math.max(dt, 0.001) - fps) * 0.05;
   game.update(dt, t);
   dbg?.();
-  if (++frames === 3) window.__GAME__ = { ready: true, game, tp: (x, z) => { game.pos.x = x; game.pos.z = z; } };
+  if (++frames === 3) window.__GAME__ = { ready: true, game, tp };
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

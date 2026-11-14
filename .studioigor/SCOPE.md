@@ -13,7 +13,7 @@ Line syntax:
 
 ## Contract
 - [ ] глубины: 1 pcs — count: manual: after phase 4
-- [ ] встречи с потерянными: 2 pcs — count: manual: after phase 4
-- [ ] финалы: 3 pcs — count: manual: after phase 4
-- [ ] резкие удары: 2 pcs — count: manual: after phase 4
+- [ ] встречи с выбором: 5 pcs — count: manual: Ефим, семья, Вера, Мила, тень
+- [ ] финалы: 4 pcs — count: manual: Один, Вместе, Маяк, Цена
+- [ ] резкие удары: 4 pcs — count: manual: ложный огонь, колонны, сквозняк, ложная тень
 - [ ] катсцены: 4 pcs — count: manual: after phase 4

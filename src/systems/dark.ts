@@ -143,7 +143,7 @@ export class Darkness {
         if (dist > 1.1 && h.burn < 0.05) { h.x -= (dx / dist) * 12 * dt; h.z -= (dz / dist) * 12 * dt; }
         else h.burn = Math.min(1, h.burn + dt * 2.4);
         h.face.size = 1.2 + Math.min(1.6, h.timer * 3);
-        place(1.5); h.face.set(t, 1 - h.burn, 1);
+        place(1.5); h.face.set(t, (1 - h.burn) * 0.8, 1);
         if (tn < TEND_MAX) tend[tn++].set(h.x, h.z, 1.8, 1 - h.burn);
         if (h.burn >= 1) { h.state = 'gone'; h.timer = S.respawn; h.alpha = 0; h.face.size = 0.9; h.face.set(t, 0); }
         near = 1;

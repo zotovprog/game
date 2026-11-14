@@ -14,7 +14,7 @@ export interface Style {
 
 export const STYLE: Style = {
   lamp: 0xf3ead6, lampGain: 1.05, fire: 0xff8a3a, wisp: 0xd6ecd0,
-  rock: 0x556270, rockAlt: 0x36414c, floor: 0x46515b, floorAlt: 0x262e35,
+  rock: 0x556270, rockAlt: 0x36414c, floor: 0x3d464e, floorAlt: 0x1e252b,
   edgeNoise: 0.6,
   sat: 0.78, contrast: 1.14, tint: [1.0, 0.995, 0.985],
   grain: 0.07, bloom: 0.55, vignette: 0.55,

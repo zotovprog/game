@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// Автопрогон ключевых сцен: телепорт по уровню, нажатия, кадры. node tools/tour.mjs <outDir> [baseUrl]
+// Автопрогон сюжета: встречи, выборы, финал. node tools/tour.mjs <outDir> [baseUrl]
 import { chromium } from 'playwright';
 import fs from 'node:fs';
 const [out = '.studioigor/captures/tour', base = 'http://localhost:5199/'] = process.argv.slice(2);
+fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
@@ -12,35 +13,41 @@ page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 await page.goto(base + '?skip=1&reset=1');
 await page.waitForFunction('window.__GAME__?.ready');
 let n = 0;
-const shot = async (name) => { await page.screenshot({ path: `${out}/${String(n++).padStart(2, '0')}-${name}.png` }); console.log(name, JSON.stringify(await page.evaluate('window.__metrics'))); };
-const tp = (x, z) => page.evaluate(([x, z]) => window.__GAME__.tp(x, z), [x, z]);
+const m = () => page.evaluate('window.__metrics');
+const shot = async (name) => { await page.screenshot({ path: `${out}/${String(n++).padStart(2, '0')}-${name}.png` }); const x = await m(); console.log(name, `oil=${x.oil} comp=${x.companions} mode=${x.mode}`, x.flags.slice(-6).join(',')); };
 const wait = (s) => page.waitForTimeout(s * 1000);
-const key = async (k, hold = 0.12) => { await page.keyboard.down(k); await wait(hold); await page.keyboard.up(k); };
-const set = (js) => page.evaluate(js);
+const key = async (k) => { await page.keyboard.down(k); await wait(0.12); await page.keyboard.up(k); };
+const D = (expr) => page.evaluate(expr);
+const near = async (what, dx = 1.3, dz = 0.4) => { await D(`(() => { const g = window.__GAME__.game, p = ${what}; g.lamp.oil = Math.max(g.lamp.oil, 70); g.lamp.wick = 0.5; window.__GAME__.tp(p.x + ${dx}, p.z + ${dz}); })()`); await wait(1.2); };
+/** Пролистать реплики до выбора или конца разговора. */
+const talk = async () => {
+  for (let i = 0; i < 40; i++) {
+    const st = await D(`(() => { const d = document.querySelector('#dialog'); return d.classList.contains('hidden') ? 'closed' : d.querySelectorAll('.opts button').length ? 'choice' : 'line'; })()`);
+    if (st !== 'line') return st;
+    await key('Space'); await wait(0.45);
+  }
+  return 'timeout';
+};
+const act = async () => { await key('Space'); await wait(0.6); return talk(); };
 
-await wait(1.5); await shot('start');
-await key('KeyW', 2.5); await shot('walk');
-await tp(160, 180); await wait(4); await shot('first-spirit');
-await set('window.__GAME__.game.lamp.wick = 0.15'); await wait(4); await shot('wick-low');
-await set('window.__GAME__.game.lamp.wick = 1'); await wait(2); await shot('wick-high');
-await tp(157.3, 166.9); await wait(1); await key('Space'); await wait(3); await shot('brazier');
-await tp(145.8, 141.6); await wait(1.5); await shot('efim-hall');
-await key('Space'); await wait(1); await shot('efim-talk');
-await key('Space'); await wait(0.6); await key('Space'); await wait(0.8); await shot('efim-choice');
-await key('Digit1'); await wait(1.2); await shot('efim-accepted');
-await key('Space'); await wait(0.5); await key('Space'); await wait(0.5);
-await set('window.__GAME__.game.lamp.wick = 0.6');
-await key('KeyA', 2.5); await shot('with-efim');
-await tp(109, 151); await wait(1); await key('KeyS', 2.2); await wait(1.6); await shot('wisp-trap');
-await tp(82, 102.5); await wait(2); await shot('vera-hall');
-await tp(80, 101.5); await wait(0.5); await key('Space'); await wait(0.8); await key('Space'); await wait(0.5); await key('Space'); await wait(0.8); await key('Digit2'); await wait(1);
-await key('Space'); await wait(0.5); await key('Space'); await wait(3); await shot('vera-leaves');
-await tp(72, 86); await wait(1.5); await tp(70, 67); await wait(1.6); await shot('gust'); await wait(2.5); await shot('gust-after');
-await tp(61, 49); await wait(3.5); await shot('returned');
-await tp(34, 36); await wait(2); await shot('gate-hall');
-await tp(26.7, 30.7); await wait(1.5); await shot('bowl');
-await key('Space'); await wait(0.6); await key('Space'); await wait(0.6); await key('Space'); await wait(0.8); await shot('bowl-choice');
-await key('Digit1'); await wait(7); await shot('beacon');
-await wait(10); await shot('ending');
+await wait(1); await shot('start');
+await near('window.__GAME__.game.npcs.efim'); console.log('efim', await act()); await shot('efim-choice');
+await key('Digit1'); await wait(0.6); await talk(); await shot('efim-with');
+await near('window.__GAME__.game.toy', 0.7, 0.3); console.log('toy', await act()); await shot('toy');
+await near('window.__GAME__.game.family', 1.7, 1.3); console.log('family', await act()); await shot('family-choice');
+await key('Digit1'); await wait(0.6); await talk(); await wait(2); await shot('family-fire');
+await near('window.__GAME__.game.shade', 2.4, 0.5); await wait(1.5); await shot('shade'); console.log('shade', await act()); await shot('shade-choice');
+await key('Digit2'); await wait(0.6); console.log('shade name', await talk()); await shot('shade-name');
+await key('Digit1'); await wait(0.6); await talk(); await shot('shade-follow');
+await near('window.__GAME__.game.npcs.vera'); console.log('vera', await act()); await shot('vera-choice');
+await key('Digit1'); await wait(0.6); await talk();
+await near('window.__GAME__.game.mila', 2.6, 1.0); await wait(1.5); console.log('reunion', await talk()); await wait(1.5); await talk(); await shot('reunion');
+console.log('shade true?', await D('window.__GAME__.game.shade.isTrue'), 'state', await D('window.__GAME__.game.shade.state'), 'mila', await D('window.__GAME__.game.mila.state'));
+await near('window.__GAME__.game.bowl', 1.2, 0.9); await wait(2); console.log('bowl', await act()); await shot('bowl-choice');
+console.log('options', await D(`[...document.querySelectorAll('#dialog .opts button span')].map((b) => b.firstChild.textContent)`));
+await key('Digit2'); await wait(0.6); await talk(); await wait(5); await shot('gate-open');
+await page.waitForSelector('.overlay.black', { timeout: 240000 });
+await wait(24); await shot('ending');
+console.log('ending text:', await D(`document.querySelector('.overlay.black').innerText.replace(/\\n+/g, ' | ')`));
 await browser.close();
-if (errors.length) { console.error('ERRORS:\n' + errors.join('\n')); process.exit(1); }
+if (errors.length) { console.error('ERRORS:\n' + errors.slice(0, 8).join('\n')); process.exit(1); }

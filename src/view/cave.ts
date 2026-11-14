@@ -2,7 +2,7 @@
 // Стены со стороны камеры низкие, дальние — высокие: героя видно, а скалы работают как задник.
 import {
   BoxGeometry, BufferAttribute, BufferGeometry, Color, ConeGeometry, CylinderGeometry, Euler, Group, InstancedMesh,
-  Matrix4, Mesh, MeshStandardMaterial, PlaneGeometry, Quaternion, SphereGeometry, Vector3,
+  Matrix4, Mesh, MeshLambertMaterial, MeshStandardMaterial, PlaneGeometry, Quaternion, SphereGeometry, Vector3,
 } from 'three';
 import { clamp, fbm, hash2, lerp, mulberry32, smooth } from '../core/rng';
 import { LevelDef } from '../data/level';
@@ -38,6 +38,8 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
   // ---------- рельеф: высоты и цвета по вершинам
   const VW = grid.w * SUB + 1, VH = grid.h * SUB + 1;
   const hgt = new Float32Array(VW * VH).fill(NaN), px = new Float32Array(VW * VH), pz = new Float32Array(VW * VH), rgb = new Float32Array(VW * VH * 3);
+  // 1) знаковое расстояние до границы пола: в камне — плюс, на полу — минус
+  let sd = new Float32Array(VW * VH).fill(NaN);
   const fd = [0, 0, 0];
   for (let gz = 0; gz < VH; gz++) for (let gx = 0; gx < VW; gx++) {
     const x0 = gx * STEP, z0 = gz * STEP;
@@ -48,24 +50,48 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
       if (i >= 0 && j >= 0) near = Math.min(near, grid.dist[j * grid.w + i]);
     }
     if (near > 3) continue;
-    const v = gz * VW + gx;
-    const x = x0 + (hash2(gx, gz, seed + 21) - 0.5) * 0.3, z = z0 + (hash2(gx, gz, seed + 22) - 0.5) * 0.3;
+    grid.floorDist(x0, z0, fd);
+    sd[gz * VW + gx] = fd[0] < 0.02 ? -Math.min(3, grid.wallDist(x0, z0)) : fd[0];
+  }
+  // 2) размытие: граница пола перестаёт быть лесенкой из клеток, стены — гладкие
+  for (let pass = 0; pass < 3; pass++) {
+    const nx = new Float32Array(VW * VH).fill(NaN);
+    for (let gz = 1; gz < VH - 1; gz++) for (let gx = 1; gx < VW - 1; gx++) {
+      const v = gz * VW + gx;
+      if (Number.isNaN(sd[v])) continue;
+      let sum = 0, wsum = 0;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        const q = sd[v + dj * VW + di];
+        if (Number.isNaN(q)) continue;
+        const wgt = (di === 0 ? 2 : 1) * (dj === 0 ? 2 : 1);
+        sum += q * wgt; wsum += wgt;
+      }
+      nx[v] = sum / wsum;
+    }
+    sd = nx;
+  }
+  // 3) высоты и цвета
+  const S = (gx: number, gz: number, fb: number): number => { const q = sd[gz * VW + gx]; return Number.isNaN(q) ? fb : q; };
+  for (let gz = 1; gz < VH - 1; gz++) for (let gx = 1; gx < VW - 1; gx++) {
+    const v = gz * VW + gx, d = sd[v];
+    if (Number.isNaN(d)) continue;
+    const x0 = gx * STEP, z0 = gz * STEP;
+    const x = x0 + (hash2(gx, gz, seed + 21) - 0.5) * 0.2, z = z0 + (hash2(gx, gz, seed + 22) - 0.5) * 0.2;
     px[v] = x; pz[v] = z;
     const kind = grid.kindAt(Math.min(grid.w - 0.01, x0), Math.min(grid.h - 0.01, z0));
-    grid.floorDist(x0, z0, fd);
-    const d = fd[0];
     let h: number;
-    if (d < 0.02) {
-      const dIn = grid.wallDist(x0, z0);
+    if (d <= 0) {
+      const dIn = -d;
       h = (fbm(x * 0.9, z * 0.9, seed + 5, 3) - 0.5) * 0.1 + 0.13 * (1 - smooth(0, 0.8, dIn)) ** 2;
       if (kind === 'water') h -= 0.36 * smooth(0.5, 2.0, dIn);
       col.copy(cA).lerp(cB, clamp((fbm(x * 0.23, z * 0.23, seed + 9, 3) - 0.3) * 2.2, 0, 1)).multiplyScalar(TONE[kind] * (0.95 + hash2(gx, gz, seed) * 0.1));
     } else {
       // камень со стороны камеры (+x+z от пола) — низкий бортик, иначе закроет героя
-      const facing = (fd[1] + fd[2]) * 0.7071;
+      const gxd = S(gx + 1, gz, d) - S(gx - 1, gz, d), gzd = S(gx, gz + 1, d) - S(gx, gz - 1, d), gl = Math.hypot(gxd, gzd) || 1;
+      const facing = (gxd + gzd) / gl * 0.7071;
       const Hk = WALL_H[kind] * (0.8 + 0.45 * fbm(x * 0.15, z * 0.15, seed + 3, 2));
       const H = lerp(Hk, 0.8, smooth(-0.1, 0.6, facing));
-      h = 0.13 + H * (1 - Math.exp(-d * 2.1)) + (fbm(x * 0.8, z * 0.8, seed + 6, 3) - 0.5) * smooth(0.25, 1.6, d) + (hash2(gx, gz, seed + 4) - 0.5) * 0.1;
+      h = 0.13 + H * (1 - Math.exp(-d * 1.9)) + (fbm(x * 0.42, z * 0.42, seed + 6, 2) - 0.5) * 0.9 * smooth(0.3, 1.7, d) + (hash2(gx, gz, seed + 4) - 0.5) * 0.03;
       const strata = 0.5 + 0.5 * Math.sin(h * 4.2 + fbm(x * 0.5, z * 0.5, seed + 12, 2) * 6);
       col.copy(rA).lerp(rB, strata * 0.8).multiplyScalar(TONE[kind] * (1 - 0.06 * Math.min(h, 4)));
     }
@@ -121,8 +147,17 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
   const boneMat = darkify(new MeshStandardMaterial({ color: 0xa8a294, roughness: 0.8 }));
   trash.push(rockMat, woodMat, ironMat, boneMat);
   const boulderGeo = knead(new SphereGeometry(1, 9, 7), 0.5, seed + 1);
-  const spikeGeo = knead(new ConeGeometry(0.32, 1.7, 9, 5), 0.35, seed + 2, 2.2);
-  spikeGeo.translate(0, 0.8, 0);
+  const spikeGeo = new ConeGeometry(0.34, 1.7, 10, 9);
+  { // сталагмит: наплывы, тупая вершина, лёгкий изгиб
+    const sp = spikeGeo.getAttribute('position') as BufferAttribute;
+    for (let i = 0; i < sp.count; i++) {
+      const y = sp.getY(i) / 1.7 + 0.5;                       // 0 у основания, 1 на вершине
+      const k = 1 + 0.22 * Math.sin(y * 11 + sp.getX(i) * 3) + (fbm(sp.getX(i) * 3 + 5, y * 5, seed + 2, 2) - 0.5) * 0.5 + 0.5 * y * y;
+      sp.setXYZ(i, sp.getX(i) * k + y * y * 0.16, sp.getY(i) * (1 - 0.12 * y), sp.getZ(i) * k);
+    }
+    spikeGeo.computeVertexNormals();
+    spikeGeo.translate(0, 0.8, 0);
+  }
   const colGeo = new CylinderGeometry(0.5, 0.62, 5, 10, 8);
   { // колонна с «талией» и наплывами
     const p = colGeo.getAttribute('position') as BufferAttribute;
@@ -250,12 +285,12 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
     if (grid.floorCell(i, j) && grid.kindAt(i, j) === 'water') { x0 = Math.min(x0, i); x1 = Math.max(x1, i + 1); z0 = Math.min(z0, j); z1 = Math.max(z1, j + 1); }
   }
   if (x1 > x0) {
-    const water = new Mesh(new PlaneGeometry(x1 - x0 + 2, z1 - z0 + 2), darkify(new MeshStandardMaterial({ color: 0x0b0e11, roughness: 0.06, metalness: 0.1, transparent: true, opacity: 0.86 })));
+    const water = new Mesh(new PlaneGeometry(x1 - x0 + 2, z1 - z0 + 2), darkify(new MeshLambertMaterial({ color: 0x07090b, transparent: true, opacity: 0.72 })));
     water.rotation.x = -Math.PI / 2;
     water.position.set((x0 + x1) / 2, -0.11, (z0 + z1) / 2);
     water.receiveShadow = true;
     group.add(water);
-    trash.push(water.geometry, water.material as MeshStandardMaterial);
+    trash.push(water.geometry, water.material as MeshLambertMaterial);
   }
 
   return { group, dispose() { trash.forEach((d) => d.dispose()); } };

@@ -16,7 +16,7 @@ VERIFIED: no
 | playwright (системный, симлинк в node_modules) | chromium 1243 | съёмка кадров |
 
 ## Agent integrations
-Облачная сессия: редактора и MCP нет, игра — код. Агент видит игру через Playwright (tools/capture.mjs, tools/shot.mjs, tools/tour.mjs, tools/tour2.mjs). Пользователь играет по ссылке-артефакту (tools/artifact.mjs склеивает dist/ в один HTML).
+Облачная сессия: редактора и MCP нет, игра — код. Агент видит игру через Playwright: tools/shot.mjs (кадр), tools/places.mjs (все места уровня), tools/tour.mjs (сюжет и выборы до финала), tools/tour2.mjs (вступление, гибель, след, телефон), tools/capture.mjs. Пользователь играет по ссылке-артефакту (tools/artifact.mjs склеивает dist/ в один HTML).
 
 ## Commands
 RUN: npm run dev
@@ -29,5 +29,5 @@ EDITOR: none — the code is in the repository
 - Скилл studioigor лежит вне репозитория (scratchpad сессии). В новой сессии: `git clone --depth 1 https://github.com/studioigor/studioigor-skill` и запускать `scripts/studio.py` оттуда.
 - Playwright не ставить через npm: в облаке он системный (`/opt/node-tools/node_modules/playwright`), в проекте — симлинк `node_modules/playwright`.
 - Сеть облака отклоняет Steam/Wikimedia/Openverse: референсы через refs.py недоступны.
-- Параметры URL: `?skip=1` без вступления, `?reset=1` забыть след, `?debug=1` панель настройки, `?scene=gym` тестовая пещера.
+- Параметры URL: `?skip=1` без вступления, `?reset=1` забыть след, `?debug=1` панель настройки и телепорты ко всем сценам (заменяет отдельные gym-сцены).
 - Headless-рендер программный и медленный: игровое время в съёмке идёт в разы медленнее реального.

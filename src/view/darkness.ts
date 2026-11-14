@@ -47,8 +47,8 @@ vec3 darkApply(vec3 col, vec3 p){
   float n2 = dkFbm(q*2.3 - vec2(uTime*0.09, uTime*0.06) + n*1.7);
   // крупные языки: тьма вдавливается в круг и отступает, как дыхание
   vec2 rl = p.xz - uLamp;
-  float ang = atan(rl.y, rl.x);
-  float lobe = dkNoise(vec2(ang * 1.9 + uTime * 0.11, uTime * 0.23)) * 0.6 + dkNoise(vec2(ang * 4.3 - uTime * 0.17, uTime * 0.31 + 7.0)) * 0.4;
+  vec2 rd = rl / max(length(rl), 0.0001);                    // направление вместо угла: без шва
+  float lobe = dkNoise(rd * 1.5 + vec2(uTime * 0.11, uTime * 0.23)) * 0.6 + dkNoise(rd * 3.4 + vec2(7.0 - uTime * 0.17, uTime * 0.31)) * 0.4;
   float edge = d + ((n2 - 0.5) * uEdgeNoise + (lobe - 0.35) * uLobe) * smoothstep(0.3, 1.0, d);
   float lit = 1.0 - smoothstep(0.7, 1.0, edge);
   // щупальца: тьма тянется к лампе от тех, кто в ней живёт
