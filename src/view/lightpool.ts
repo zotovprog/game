@@ -6,6 +6,8 @@ export interface Emitter { x: number; y: number; z: number; color: number; inten
 export class LightPool {
   private lights: PointLight[] = [];
   private list: Emitter[] = [];
+  /** источники, получившие свет в этом кадре (ближайшие к герою) */
+  active: Emitter[] = [];
   constructor(scene: Scene, n = 3) {
     for (let i = 0; i < n; i++) {
       const l = new PointLight(0xffffff, 0, 8, 1.6);
@@ -17,6 +19,7 @@ export class LightPool {
   add(e: Emitter): void { if (e.intensity > 0.01) this.list.push(e); }
   commit(fx: number, fz: number): void {
     this.list.sort((a, b) => (a.x - fx) ** 2 + (a.z - fz) ** 2 - ((b.x - fx) ** 2 + (b.z - fz) ** 2));
+    this.active = this.list.slice(0, this.lights.length);
     this.lights.forEach((l, i) => {
       const e = this.list[i];
       if (!e) { l.intensity = 0; return; }

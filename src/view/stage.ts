@@ -1,7 +1,7 @@
 // Сцена, изометрическая камера, постобработка. Один на всё приложение.
 import {
-  ACESFilmicToneMapping, Color, OrthographicCamera, PCFSoftShadowMap, Scene, ShaderMaterial, Vector2,
-  Vector3, WebGLRenderer,
+  ACESFilmicToneMapping, Color, DepthTexture, HalfFloatType, OrthographicCamera, PCFSoftShadowMap, Scene, ShaderMaterial, Vector2,
+  Vector3, WebGLRenderer, WebGLRenderTarget,
 } from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
@@ -11,17 +11,18 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { damp } from '../core/rng';
 import { Style } from '../data/styles';
 import { darkU } from './darkness';
+import { VolumePass } from './volume';
 
 const GRADE = {
   uniforms: {
     tDiffuse: { value: null }, uTime: { value: 0 }, uRes: { value: new Vector2(1, 1) },
     uSat: { value: 1 }, uContrast: { value: 1 }, uTint: { value: new Vector3(1, 1, 1) },
-    uGrain: { value: 0.06 }, uVignette: { value: 0.5 }, uPressure: { value: 0 }, uChroma: { value: 0 }, uFade: { value: 0 }, uSmoke: { value: 1 },
+    uGrain: { value: 0.06 }, uVignette: { value: 0.5 }, uPressure: { value: 0 }, uChroma: { value: 0 }, uFade: { value: 0 },
     uCenter: { value: new Vector2(0.5, 0.5) },
   },
   vertexShader: /* glsl */ `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
   fragmentShader: /* glsl */ `
-    uniform sampler2D tDiffuse; uniform float uTime, uSat, uContrast, uGrain, uVignette, uPressure, uChroma, uFade, uSmoke;
+    uniform sampler2D tDiffuse; uniform float uTime, uSat, uContrast, uGrain, uVignette, uPressure, uChroma, uFade;
     uniform vec3 uTint; uniform vec2 uRes, uCenter; varying vec2 vUv;
     float h(vec2 p){ p = fract(p*vec2(123.34,456.21)); p += dot(p,p+45.32); return fract(p.x*p.y); }
     float n2(vec2 p){ vec2 i=floor(p), f=fract(p); vec2 u=f*f*(3.0-2.0*f);
@@ -38,12 +39,6 @@ const GRADE = {
       float r = length(a);
       vec2 dir = a / max(r, 0.0001);                               // вместо угла: у atan есть шов
       float wob = n2(dir * 1.7 + vec2(uTime * 0.25, 3.0)) * 0.6 + n2(dir * 4.5 + vec2(9.0, uTime * 0.5)) * 0.4;
-      // чернота не пустая: в ней течёт едва видимый дым — к лампе, к тебе
-      float s1 = n2(dir * 2.4 + vec2(r * 4.5 + uTime * 0.33, -r * 3.0 - uTime * 0.21));
-      float s2 = n2(a * 7.0 + vec2(uTime * 0.07, -uTime * 0.05));
-      float s3 = n2(a * 11.0 - vec2(uTime * 0.11, uTime * 0.08));
-      float dark = 1.0 - smoothstep(0.0, 0.045, l);
-      col += vec3(0.04, 0.044, 0.052) * pow(s1 * s2 * 1.6, 2.6) * (0.5 + 1.0 * s3) * dark * uSmoke * (0.55 + uPressure);
       float inner = mix(0.95, 0.16, uPressure) + (wob - 0.5) * mix(0.1, 0.22, uPressure);
       float vig = smoothstep(inner, inner + mix(0.75, 0.3, uPressure), r);
       col *= 1.0 - vig * mix(uVignette, 1.0, uPressure);
@@ -61,6 +56,7 @@ export class Stage {
   readonly composer: EffectComposer;
   readonly grade: ShaderMaterial;
   readonly bloom: UnrealBloomPass;
+  readonly volume: VolumePass;
   /** высота видимой области в метрах */
   viewH = 14.5;
   viewHTarget = 14.5;
@@ -90,8 +86,12 @@ export class Stage {
     this.right.set(Math.cos(yaw), 0, -Math.sin(yaw));
     this.up.set(-Math.sin(yaw), 0, -Math.cos(yaw));
 
-    this.composer = new EffectComposer(this.renderer);
+    // глубина сцены нужна объёмной тьме: дым не должен течь сквозь камень
+    const rt = new WebGLRenderTarget(4, 4, { type: HalfFloatType, depthTexture: new DepthTexture(4, 4) });
+    this.composer = new EffectComposer(this.renderer, rt);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.volume = new VolumePass(this.camera, this.mobile ? 0.4 : 0.5, this.mobile ? 9 : 14);
+    this.composer.addPass(this.volume);
     this.bloom = new UnrealBloomPass(new Vector2(256, 256), style.bloom, 0.75, 0.9);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
@@ -116,6 +116,8 @@ export class Stage {
     const w = innerWidth, h = innerHeight;
     this.renderer.setSize(w, h, false);
     this.composer.setSize(w, h);
+    const pr = this.renderer.getPixelRatio();
+    this.volume.setSize(w * pr, h * pr);
     (this.grade.uniforms.uRes.value as Vector2).set(w, h);
     this.updateCamera();
   }
@@ -149,6 +151,7 @@ export class Stage {
     darkU.uCutPos.value.set(focus.x, 0.9, focus.z);
     darkU.uCutDir.value.copy(this.camDir);
     const u = this.grade.uniforms;
+    this.volume.press = this.pressure;
     u.uTime.value = this.t; u.uPressure.value = this.pressure; u.uChroma.value = this.chroma; u.uFade.value = this.fade;
     const p = lampWorld.clone().project(this.camera);
     (u.uCenter.value as Vector2).set(p.x * 0.5 + 0.5, p.y * 0.5 + 0.5);

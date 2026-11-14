@@ -1,5 +1,5 @@
 // Игра: сборка глубины из данных и главный цикл. Сюжетные сцены и выборы — в systems/story.ts.
-import { Group, Mesh, MeshBasicMaterial, SphereGeometry, Sprite, Vector3 } from 'three';
+import { Color, Group, Mesh, MeshBasicMaterial, SphereGeometry, Sprite, Vector3 } from 'three';
 import { Sfx } from '../audio/sfx';
 import { Input } from '../core/input';
 import { clamp, damp, lerp, mulberry32, smooth } from '../core/rng';
@@ -223,7 +223,7 @@ export class Game {
     scene.add(this.gate.group, this.gate.bowl);
     this.grid.obstacles.push({ x: this.bowl.x, z: this.bowl.z, r: 0.5 });
 
-    this.dark = new Darkness(scene, style, this.grid);
+    this.dark = new Darkness(this.grid);
     this.dark.onSound = (s, pan, vol) => this.sfx.dark(s, pan, vol);
     this.pool = new LightPool(scene, 3);
     this.dust = new Dust(style.lamp, stage.mobile ? 150 : 280);
@@ -486,8 +486,20 @@ export class Game {
       this.pool.add({ x: this.bowl.x, y: 1.4, z: this.bowl.z, color: this.beacon.color, intensity: 26 * (0.9 + 0.1 * this.lantern.flicker), distance: 9 });
       safe.push({ x: this.bowl.x, z: this.bowl.z, r: 5.5 });
     }
+    for (const f of this.flasks) if (!f.taken && this.dist(f.x, f.z) < 22) addDarkLight(f.x, 0.2, f.z, 0.75);
+    if (!this.toy.taken && this.dist(this.toy.x, this.toy.z) < 22) addDarkLight(this.toy.x, 0.2, this.toy.z, 0.6);
+    if (this.mila.state === 'wait' || this.mila.state === 'left') addDarkLight(this.mila.x + 0.45, 0.2, this.mila.z + 0.3, 0.9);
+    if (this.family.fire.k < 0.5 && this.dist(this.family.x, this.family.z) < 22) addDarkLight(this.family.x, 0.3, this.family.z, 0.8);
     commitDarkLights(this.pos.x, this.pos.z);
     this.pool.commit(this.pos.x, this.pos.z);
+    // свет на дыме: лампа и ближайшие живые огни
+    const V = S.volume;
+    V.glowPos[0].copy(this.lampWorld); V.glowCol[0].set(_c.set(this.style.lamp).r, _c.g, _c.b).multiplyScalar(this.lantern.light.intensity * 0.5); V.glowDist[0] = this.lantern.light.distance;
+    for (let i = 0; i < 3; i++) {
+      const e = this.pool.active[i];
+      if (e) { V.glowPos[i + 1].set(e.x, e.y, e.z); _c.set(e.color); V.glowCol[i + 1].set(_c.r, _c.g, _c.b).multiplyScalar(e.intensity * 0.5); V.glowDist[i + 1] = e.distance; }
+      else V.glowDist[i + 1] = 0;
+    }
 
     // стоишь — тьма подползает: языки растут, пока не двинешься
     const inSafe = safe.some((s) => Math.hypot(s.x - this.pos.x, s.z - this.pos.z) < s.r);
@@ -499,7 +511,7 @@ export class Game {
     // тьма
     const w = this.world(lamp.held && this.mode === 'play' && !talking && this.dist(gp.x, gp.z) > 9 && this.dist(this.shade.x, this.shade.z) > (this.shade.state === 'wait' ? 7 : 0));
     w.ember = this.ember || this.gust > 0.5; w.safe = safe;
-    const touched = this.dark.update(dt, t, w);
+    const touched = this.dark.update(dt, w);
     if (touched && live && this.gust < 0.1) {
       if (this.ember) this.die();
       else {
@@ -554,4 +566,4 @@ export class Game {
   }
 }
 
-const _v = new Vector3(), _focus = new Vector3();
+const _v = new Vector3(), _focus = new Vector3(), _c = new Color();

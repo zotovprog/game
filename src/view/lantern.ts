@@ -43,7 +43,7 @@ export class Lantern {
     this.flame.position.y = 0.085;
     this.glow = makeGlow(style.lamp, 0.9, 1.0);
     this.glow.position.y = 0.1;
-    this.halo = makeGlow(style.lamp, 5, 0.05);
+    this.halo = makeGlow(style.lamp, 5, 0.02);
     this.halo.position.y = 0.1;
     this.group.add(this.glass, this.flame, this.glow, this.halo);
 

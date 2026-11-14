@@ -7,6 +7,7 @@ import { T } from '../data/tuning';
 import type { Game, Npc } from '../scenes/game';
 import { Human } from '../view/human';
 import { Candle, Fire } from '../view/props';
+import { Spirit } from '../view/spirit';
 import { Choice } from '../ui/hud';
 
 type Stayed = 'self' | 'efim' | 'vera' | 'trace' | null;
@@ -14,6 +15,7 @@ type Stayed = 'self' | 'efim' | 'vera' | 'trace' | null;
 export class Story {
   private ownGhost: { x: number; z: number } | null = null;
   private keeper: { x: number; z: number } | null = null;
+  private ownShade: Spirit | null = null;
   private holder: Group | null = null;       // на чьих руках Мила
   private shadeT = 0;                        // сколько тень уже идёт за тобой
 
@@ -32,7 +34,11 @@ export class Story {
     const g = this.g, tr = g.trace;
     if (tr.lastDeath && g.grid.isFloor(tr.lastDeath.x, tr.lastDeath.z)) {
       const [x, z] = g.grid.snap(tr.lastDeath.x, tr.lastDeath.z, 0.5);
-      g.dark.placeStill('self', x, z);
+      const own = new Spirit(g.style, 0.71, 0.95, 0.5);
+      own.group.position.set(x, 0, z);
+      own.alpha = 0.9; own.face = 0.5; own.update(0);
+      g.stage.scene.add(own.group);
+      this.ownShade = own;
       g.addFlask(...g.grid.snap(x + 0.9, z + 0.6, 0.4), true);
       this.ownGhost = { x, z };
     }
@@ -405,6 +411,10 @@ export class Story {
       g.flags.add(z.id);
       this.zone(z.id);
     }
+    if (this.ownGhost && this.ownShade) {
+      this.ownShade.group.rotation.y = Math.atan2(g.pos.x - this.ownGhost.x, g.pos.z - this.ownGhost.z);
+      this.ownShade.update(performance.now() / 1000);
+    }
     if (this.ownGhost && !g.flags.has('ownGhost') && g.dist(this.ownGhost.x, this.ownGhost.z) < g.radius + 0.5) {
       g.flags.add('ownGhost');
       g.lookAt = { ...this.ownGhost };
@@ -476,6 +486,7 @@ export class Story {
       g.after(at, () => {
         if (g.mode !== 'play') return;
         g.dark.spawnNamed(kind, g.world());
+        g.dark.lunge(g.pos.x - g.face.x * (g.radius + 3), g.pos.z - g.face.z * (g.radius + 3));
         g.sfx.whisper(-g.face.x > 0 ? 0.8 : -0.8, 0.2); g.sfx.touch();
         g.chroma = 0.8; g.stage.shake = 0.35;
         lines.forEach((l, i) => g.after(0.4 + i * 2.6, () => g.hud.whisper(l)));

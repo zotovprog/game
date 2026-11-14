@@ -1,21 +1,18 @@
-// Живая тьма. Она — одно существо: ползёт в круг света языками, а те, кто в ней остался,
-// — её лица. «Охотники» тянутся к лампе, «смотрящие» бродят в черноте, всплывают и тают.
-import { Scene } from 'three';
+// Живая тьма. Она — одно существо без лица: стоит стеной дыма за краем света и тянется к лампе
+// языками. «Охотники» — невидимые точки её внимания: по ним строятся языки (см. view/volume.ts),
+// они же решают, когда тьма дотянулась до героя. Картинок в темноте нет — только дым и звук.
 import { clamp, damp, mulberry32, smooth } from '../core/rng';
-import { Style } from '../data/styles';
 import { T } from '../data/tuning';
 import { darkU, TEND_MAX } from '../view/darkness';
-import { Face } from '../view/faces';
 import { Grid } from '../world/grid';
 
-export type DarkKind = 'shade' | 'efim' | 'vera' | 'family' | 'self';
+export type DarkKind = 'shade' | 'efim' | 'vera' | 'family';
 export type DarkSound = 'moan' | 'click' | 'breath' | 'knock' | 'cry' | 'scrape';
 export interface Hunter {
-  face: Face; kind: DarkKind; x: number; z: number; ang: number; orbit: number; off: number;
-  state: 'lurk' | 'gone' | 'lunge' | 'still'; timer: number; stuck: number; seed: number;
+  kind: DarkKind; x: number; z: number; ang: number; orbit: number; off: number;
+  state: 'lurk' | 'gone' | 'lunge'; timer: number; stuck: number; seed: number;
   alpha: number; burn: number; probe: number; probeT: number;
 }
-interface Watcher { face: Face; x: number; z: number; h: number; vx: number; vz: number; life: number; span: number; peak: number; on: boolean }
 export interface SafeLight { x: number; z: number; r: number }
 export interface DarkWorld {
   px: number; pz: number; fx: number; fz: number;     // герой и куда он смотрит
@@ -24,33 +21,21 @@ export interface DarkWorld {
   safe: SafeLight[];
 }
 
-const WATCHERS = 11;
-
 export class Darkness {
   readonly hunters: Hunter[] = [];
-  private watchers: Watcher[] = [];
   private rng = mulberry32(99);
   private soundT = 4;
-  /** 0..1 — как близко ближайший охотник (для звука и давления) */
+  /** 0..1 — как близко ближайший язык тьмы (для звука и давления) */
   nearness = 0;
   nearestAngle = 0;
   /** Тьма подаёт голос: тип, панорама −1..1, громкость 0..1 */
   onSound: (s: DarkSound, pan: number, vol: number) => void = () => {};
 
-  constructor(private scene: Scene, private style: Style, private grid: Grid) {
-    for (let i = 0; i < WATCHERS; i++) {
-      const face = new Face(i, style.spiritFace, this.rng());
-      scene.add(face.sprite);
-      this.watchers.push({ face, x: 0, z: 0, h: 1.4, vx: 0, vz: 0, life: this.rng() * 6, span: 0, peak: 0, on: false });
-    }
-  }
+  constructor(private grid: Grid) {}
 
   private make(kind: DarkKind): Hunter {
     const seed = this.rng();
-    const face = new Face(Math.floor(seed * 97), this.style.spiritFace, seed);
-    face.size = kind === 'shade' ? 0.75 + this.rng() * 0.35 : 1.15;
-    this.scene.add(face.sprite);
-    const h: Hunter = { face, kind, x: 0, z: 0, ang: this.rng() * 6.283, orbit: this.rng() < 0.5 ? -1 : 1, off: this.rng() * 1.2, state: 'gone', timer: this.rng() * 2, stuck: 0, seed, alpha: 0, burn: 0, probe: 0, probeT: 3 + this.rng() * 6 };
+    const h: Hunter = { kind, x: 0, z: 0, ang: this.rng() * 6.283, orbit: this.rng() < 0.5 ? -1 : 1, off: this.rng() * 1.2, state: 'gone', timer: this.rng() * 2, stuck: 0, seed, alpha: 0, burn: 0, probe: 0, probeT: 3 + this.rng() * 6 };
     this.hunters.push(h);
     return h;
   }
@@ -58,21 +43,15 @@ export class Darkness {
   get count(): number { return this.hunters.filter((s) => s.kind === 'shade').length; }
   setCount(n: number): void { for (let have = this.count; have < n; have++) this.make('shade'); }
 
-  /** Неподвижное лицо-памятник (твой след). */
-  placeStill(kind: DarkKind, x: number, z: number): void {
-    const h = this.make(kind);
-    h.state = 'still'; h.x = x; h.z = z;
-  }
-
   /** Вернувшийся: тот, кого ты бросил. Обычный свет его не держит. */
   spawnNamed(kind: DarkKind, w: DarkWorld): void {
     const h = this.make(kind);
-    h.ang = Math.atan2(-w.fz, -w.fx);            // появляется за спиной
+    h.ang = Math.atan2(-w.fz, -w.fx);            // подступает со спины
     h.x = w.px + Math.cos(h.ang) * (w.radius + 2); h.z = w.pz + Math.sin(h.ang) * (w.radius + 2);
     h.state = 'lurk'; h.timer = 0;
   }
 
-  /** Бросок из темноты: лицо летит на героя и сгорает у самого света. */
+  /** Бросок: язык тьмы выстреливает из черноты к герою и сгорает у самой лампы. */
   lunge(x: number, z: number): void {
     const h = this.hunters.find((s) => s.kind === 'shade' && s.state !== 'lunge') ?? this.make('shade');
     h.x = x; h.z = z; h.state = 'lunge'; h.timer = 0; h.burn = 0; h.alpha = 1;
@@ -81,7 +60,6 @@ export class Darkness {
   /** Вспыхнул огонь: тьма отшатывается. */
   scatter(): void {
     for (const h of this.hunters) if (h.kind === 'shade' && h.state === 'lurk') h.burn = Math.max(h.burn, 0.6);
-    for (const w of this.watchers) w.life = Math.max(w.life, w.span - 0.6);
   }
 
   /** Насытился или сгорел: исчезает и вернётся позже. */
@@ -102,54 +80,28 @@ export class Darkness {
     h.ang = best;
   }
 
-  private respawnWatcher(wt: Watcher, w: DarkWorld): void {
-    wt.on = false; wt.life = 0; wt.span = 1 + this.rng() * 2;         // пауза, если не нашлось места
-    for (let k = 0; k < 8; k++) {
-      const a = this.rng() * 6.283, far = this.rng();
-      const d = w.radius + 1.6 + far * 8;
-      const x = w.px + Math.cos(a) * d, z = w.pz + Math.sin(a) * d;
-      if (!this.grid.isFloor(x, z)) continue;
-      const huge = far > 0.55 && this.rng() < 0.1;
-      wt.x = x; wt.z = z; wt.h = huge ? 2.6 : 0.8 + this.rng() * 1.5;
-      wt.face.size = huge ? 2.6 + this.rng() : 0.5 + this.rng() * 0.6;
-      const tang = a + Math.PI / 2, sp = (this.rng() - 0.5) * 0.9;
-      wt.vx = Math.cos(tang) * sp; wt.vz = Math.sin(tang) * sp;
-      wt.span = 4 + this.rng() * 8; wt.peak = huge ? 0.22 : 0.12 + this.rng() * 0.26; wt.on = true;
-      return;
-    }
-  }
-
-  /** Возвращает охотника, который дотянулся до героя, если такой есть. */
-  update(dt: number, t: number, w: DarkWorld): Hunter | null {
+  /** Возвращает язык тьмы, который дотянулся до героя, если такой есть. */
+  update(dt: number, w: DarkWorld): Hunter | null {
     const S = T.spirits;
     let touched: Hunter | null = null;
     let near = 0, tn = 0;
     const tend = darkU.uTendrils.value;
-    const pan = (x: number, z: number) => clamp(((x - w.px) * w.rx + (z - w.pz) * w.rz) / 6, -1, 1);
 
     for (const h of this.hunters) {
       const dx = h.x - w.px, dz = h.z - w.pz;
       const dist = Math.hypot(dx, dz);
       const named = h.kind !== 'shade';
-      const place = (y: number) => h.face.sprite.position.set(h.x, y, h.z);
 
-      if (h.state === 'still') {
-        h.alpha = damp(h.alpha, dist < w.radius + 6 ? 0.55 : 0.15, 2, dt);
-        place(1.6); h.face.set(t, h.alpha);
-        continue;
-      }
       if (h.state === 'lunge') {
         h.timer += dt;
         if (dist > 1.1 && h.burn < 0.05) { h.x -= (dx / dist) * 12 * dt; h.z -= (dz / dist) * 12 * dt; }
-        else h.burn = Math.min(1, h.burn + dt * 2.4);
-        h.face.size = 1.2 + Math.min(1.6, h.timer * 3);
-        place(1.5); h.face.set(t, (1 - h.burn) * 0.8, 1);
-        if (tn < TEND_MAX) tend[tn++].set(h.x, h.z, 1.8, 1 - h.burn);
-        if (h.burn >= 1) { h.state = 'gone'; h.timer = S.respawn; h.alpha = 0; h.face.size = 0.9; h.face.set(t, 0); }
+        else h.burn = Math.min(1, h.burn + dt * 2.0);
+        if (tn < TEND_MAX) tend[tn++].set(h.x, h.z, 2.2, 1 - h.burn);
+        if (h.burn >= 1) { h.state = 'gone'; h.timer = S.respawn; h.alpha = 0; }
         near = 1;
         continue;
       }
-      if (!w.active) { h.alpha = damp(h.alpha, 0, 3, dt); h.face.set(t, h.alpha * 0.4); continue; }
+      if (!w.active) { h.alpha = damp(h.alpha, 0, 3, dt); continue; }
 
       // желанная дистанция: за границей света; при малом круге — внутри него
       let D = w.radius + S.margin + h.off * 0.6 - Math.max(0, S.boldRadius - w.radius) * S.boldDepth;
@@ -158,7 +110,7 @@ export class Darkness {
       D = Math.max(0.2, D);
 
       if (h.state === 'gone') {
-        h.timer -= dt; h.alpha = 0; h.face.set(t, 0);
+        h.timer -= dt; h.alpha = 0;
         if (h.timer <= 0) {
           this.pickAngle(h, w, D + 3);
           h.x = w.px + Math.cos(h.ang) * (D + 3.5); h.z = w.pz + Math.sin(h.ang) * (D + 3.5);
@@ -193,20 +145,16 @@ export class Darkness {
         if (ml > 0.05) { const st = Math.min(ml, sp * dt); h.x += (mx / ml) * st; h.z += (mz / ml) * st; }
       }
 
-      // язык тьмы время от времени пробует свет на вкус
-      h.probeT -= dt;
+      // язык тьмы время от времени пробует свет на вкус; при малом круге — почти не убирается
+      h.probeT -= dt * (1 + 2 * smooth(4.5, 2.2, w.radius));
       if (h.probeT <= 0) h.probeT = 6 + this.rng() * 9;
-      h.probe = damp(h.probe, h.probeT < 3 ? 1 : 0, 1.6, dt);
+      h.probe = damp(h.probe, h.probeT < 3.4 ? 1 : 0, 1.4, dt);
 
       const inRock = !this.grid.isFloor(h.x, h.z);
       h.alpha = damp(h.alpha, inRock ? 0 : 1, 3, dt);
       const live = h.alpha * (1 - h.burn);
-      const reach = Math.max(1.0, dist - h.probe * 1.9);
-      if (tn < TEND_MAX && live > 0.05 && dist > 0.01) tend[tn++].set(w.px + (dx / dist) * reach, w.pz + (dz / dist) * reach, 1.0 + h.seed * 0.7, live);
-      const surf = smooth(0.6, 0.9, Math.sin(t * 0.33 + h.seed * 40) * 0.5 + 0.5);
-      const close = 1 - smooth(w.radius - 0.4, w.radius + 1.6, dist);
-      place(1.25 + Math.sin(t * 0.8 + h.seed * 9) * 0.25);
-      h.face.set(t, live * (named ? 0.75 : clamp(Math.max(surf * 0.3, close * 0.8), 0, 1)), close);
+      const reach = Math.max(0.9, dist - h.probe * (named ? 2.6 : 2.1));
+      if (tn < TEND_MAX && live > 0.05 && dist > 0.01) tend[tn++].set(w.px + (dx / dist) * reach, w.pz + (dz / dist) * reach, (named ? 1.5 : 1.0) + h.seed * 0.7, live);
 
       if (!inRock) {
         const n = 1 - smooth(1.0, 7, dist);
@@ -216,33 +164,15 @@ export class Darkness {
     }
     for (; tn < TEND_MAX; tn++) tend[tn].set(0, 0, 0, 0);
 
-    // смотрящие: бродят в черноте, проступают и тают; свет их стирает
-    for (const wt of this.watchers) {
-      wt.life += dt;
-      if (!wt.on) { if (wt.life > wt.span && w.active) this.respawnWatcher(wt, w); wt.face.set(t, 0); continue; }
-      wt.x += wt.vx * dt; wt.z += wt.vz * dt;
-      const d = Math.hypot(wt.x - w.px, wt.z - w.pz);
-      let lit = d < w.radius + 0.7 || d > w.radius + 13 || !w.active;
-      for (const s of w.safe) if (Math.hypot(wt.x - s.x, wt.z - s.z) < s.r + 0.5) lit = true;
-      if (lit && wt.life < wt.span - 0.5) wt.life = wt.span - 0.5;
-      const env = smooth(0, 1.8, wt.life) * (1 - smooth(wt.span - 1.4, wt.span, wt.life));
-      wt.face.sprite.position.set(wt.x, wt.h, wt.z);
-      wt.face.set(t, env * wt.peak);
-      if (wt.life >= wt.span) { wt.on = false; wt.life = 0; wt.span = 0.5 + this.rng() * 3; }
-    }
-
-    // голоса тьмы: откуда-то сбоку, всегда из черноты
-    this.soundT -= dt * (0.6 + near + (w.ember ? 1.5 : 0));
+    // голоса тьмы: всегда из черноты, откуда-то сбоку
+    this.soundT -= dt * (0.6 + near + (w.ember ? 1.5 : 0) + smooth(4.5, 2.2, w.radius));
     if (this.soundT <= 0 && w.active) {
       this.soundT = 2.2 + this.rng() * 5;
-      const live = this.watchers.filter((x) => x.on);
-      const src = live[Math.floor(this.rng() * live.length)];
-      if (src) {
-        const d = Math.hypot(src.x - w.px, src.z - w.pz);
-        const roll = this.rng();
-        const kind: DarkSound = roll < 0.3 ? 'moan' : roll < 0.52 ? 'breath' : roll < 0.72 ? 'click' : roll < 0.86 ? 'knock' : roll < 0.95 ? 'scrape' : 'cry';
-        this.onSound(kind, pan(src.x, src.z), clamp(1.3 - d / 14, 0.25, 1));
-      }
+      const a = this.rng() * 6.283, d = w.radius + 1.5 + this.rng() * 8;
+      const side = Math.cos(a) * w.rx + Math.sin(a) * w.rz;
+      const roll = this.rng();
+      const kind: DarkSound = roll < 0.3 ? 'moan' : roll < 0.52 ? 'breath' : roll < 0.72 ? 'click' : roll < 0.86 ? 'knock' : roll < 0.95 ? 'scrape' : 'cry';
+      this.onSound(kind, clamp(side * 1.2, -1, 1), clamp(1.3 - d / 14, 0.25, 1));
     }
     this.nearness = damp(this.nearness, near, 4, dt);
     return touched;

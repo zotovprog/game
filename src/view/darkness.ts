@@ -2,7 +2,7 @@
 // света, уходит в чёрное; граница изъедена шумом, который ползёт внутрь круга.
 import { Material, Vector2, Vector3, Vector4 } from 'three';
 
-export const DARK_MAX = 8;
+export const DARK_MAX = 12;
 export const TEND_MAX = 6;
 
 export const darkU = {
