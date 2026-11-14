@@ -1,6 +1,6 @@
 // Сцена, изометрическая камера, постобработка. Один на всё приложение.
 import {
-  ACESFilmicToneMapping, Color, DepthTexture, HalfFloatType, OrthographicCamera, PCFSoftShadowMap, Scene, ShaderMaterial, Vector2,
+  ACESFilmicToneMapping, Color, DepthTexture, HalfFloatType, OrthographicCamera, PCFSoftShadowMap, PointLight, Scene, ShaderMaterial, Vector2,
   Vector3, WebGLRenderer, WebGLRenderTarget,
 } from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -72,11 +72,15 @@ export class Stage {
   readonly mobile: boolean;
   private t = 0;
   private slow = 0;             // сколько секунд подряд кадры идут медленно
+  private avg = 1 / 60;         // сглаженное время кадра
+  private warm = 0;             // первые секунды не в счёт: там компилируются шейдеры
+  private tier = 0;             // сколько ступеней упрощения уже применено
+  private marks: number[] = []; // время кадра перед каждой ступенью: не помогло — дальше не режем
 
   constructor(readonly canvas: HTMLCanvasElement, public style: Style) {
     this.mobile = matchMedia('(pointer: coarse)').matches;
     this.renderer = new WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, this.mobile ? 1.5 : 2));
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, this.mobile ? 1.25 : 1.5));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = PCFSoftShadowMap;
     this.renderer.toneMapping = ACESFilmicToneMapping;
@@ -134,6 +138,33 @@ export class Stage {
     this.camera.updateProjectionMatrix();
   }
 
+  /** Слабое устройство: пока кадры идут медленнее ~45 в секунду, по ступени упрощаем картинку. */
+  private adapt(dt: number): void {
+    if (dt <= 0 || dt > 0.2 || navigator.webdriver) return;        // пауза вкладки и автопрогон не в счёт
+    if ((this.warm += dt) < 3) return;
+    this.avg += (dt - this.avg) * Math.min(1, dt * 2);
+    this.slow = this.avg > 1 / 45 ? this.slow + dt : Math.max(0, this.slow - dt * 2);
+    if (this.slow < 2 || this.tier >= Stage.STEPS.length) return;
+    // частота урезана самой системой (энергосбережение): упрощения ничего не дают — не портим картинку зря
+    const two = this.marks[this.marks.length - 2];
+    if (two !== undefined && this.avg > two * 0.92) { this.tier = Stage.STEPS.length; return; }
+    this.marks.push(this.avg);
+    this.slow = 0;
+    const step = Stage.STEPS[this.tier++];
+    if (step === 'fog') this.volume.degrade();
+    else if (step === 'res') {
+      const pr = Math.max(0.7, this.renderer.getPixelRatio() * 0.8);
+      this.renderer.setPixelRatio(pr); this.composer.setPixelRatio(pr); this.resize();
+    } else {
+      this.scene.traverse((o) => {
+        const l = o as PointLight;
+        if (!l.isLight || !l.castShadow || !l.shadow || l.shadow.mapSize.x <= 256) return;
+        l.shadow.mapSize.multiplyScalar(0.5); l.shadow.map?.dispose(); l.shadow.map = null;
+      });
+    }
+  }
+  private static readonly STEPS = ['fog', 'res', 'fog', 'shadow', 'res', 'res'] as const;
+
   /** focus — куда смотрит камера (обычно герой), lampWorld — центр давления. */
   render(dt: number, focus: Vector3, lampWorld: Vector3): void {
     this.t += dt;
@@ -155,11 +186,7 @@ export class Stage {
     darkU.uCutDir.value.copy(this.camDir);
     const u = this.grade.uniforms;
     this.volume.press = Math.max(this.pressure, this.dread * 0.7);
-    // слабое устройство: если кадры долго идут медленнее ~27 в секунду, дым считается грубее
-    if (dt > 0 && !navigator.webdriver) {
-      this.slow = dt > 1 / 27 ? this.slow + dt : Math.max(0, this.slow - dt * 2);
-      if (this.slow > 2.5) { this.slow = 0; this.volume.degrade(); }
-    }
+    this.adapt(dt);
     u.uTime.value = this.t; u.uPressure.value = this.pressure; u.uChroma.value = this.chroma; u.uFade.value = this.fade;
     const p = lampWorld.clone().project(this.camera);
     (u.uCenter.value as Vector2).set(p.x * 0.5 + 0.5, p.y * 0.5 + 0.5);

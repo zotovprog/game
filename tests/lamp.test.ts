@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { T } from '../src/data/tuning';
-import { addOil, burnRate, isDead, lightRadius, newLamp, stepLamp } from '../src/systems/lamp';
+import { addOil, burnRate, isDead, lightRadius, newLamp, pourStep, stepLamp } from '../src/systems/lamp';
 
 describe('лампа', () => {
   it('яркий фитиль жжёт масло быстрее, спутники — ещё быстрее', () => {
@@ -22,9 +22,24 @@ describe('лампа', () => {
     addOil(s, T.lamp.flask); stepLamp(s, 0.1, 0); expect(s.ember).toBe(0);
     s.oil = 0; stepLamp(s, T.lamp.emberTime + 0.1, 0); expect(isDead(s)).toBe(true);
   });
-  it('масло — это отсчёт: стартового хватает на 30–60 с, склянки — на 12–25 с', () => {
+  it('масло — отсчёт, но не казнь: стартового хватает на 50–90 с, склянки — на 30–55 с', () => {
     const rate = burnRate(T.lamp.wickDefault, 0);
-    expect(T.lamp.startOil / rate).toBeGreaterThan(30); expect(T.lamp.startOil / rate).toBeLessThan(60);
-    expect(T.lamp.flask / rate).toBeGreaterThan(12); expect(T.lamp.flask / rate).toBeLessThan(25);
+    expect(T.lamp.startOil / rate).toBeGreaterThan(50); expect(T.lamp.startOil / rate).toBeLessThan(90);
+    expect(T.lamp.flask / rate).toBeGreaterThan(30); expect(T.lamp.flask / rate).toBeLessThan(55);
+  });
+  it('доливать надо самому: держать, пока не дольётся; отпустил — сброс', () => {
+    const s = newLamp(); s.held = true; s.oil = 20; s.flasks = 2;
+    expect(pourStep(s, T.lamp.pourTime * 0.6, true)).toBe('none');
+    pourStep(s, 1, false); expect(s.pour).toBe(0); expect(s.flasks).toBe(2);
+    pourStep(s, T.lamp.pourTime * 0.6, true);
+    expect(pourStep(s, T.lamp.pourTime * 0.6, true)).toBe('poured');
+    expect(s.flasks).toBe(1); expect(s.oil).toBe(20 + T.lamp.flask);
+  });
+  it('задуло: света нет и масло не горит, пока не разожжёшь', () => {
+    const s = newLamp(); s.held = true; s.oil = 50; s.lit = false; s.flasks = 0;
+    expect(lightRadius(s)).toBe(T.lamp.outRadius);
+    stepLamp(s, 5, 0); expect(s.oil).toBe(50);
+    expect(pourStep(s, T.lamp.relightTime + 0.01, true)).toBe('relit');
+    expect(s.lit).toBe(true);
   });
 });

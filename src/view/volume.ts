@@ -2,7 +2,7 @@
 // За краем света дым стоит стеной, по полу затекает в круг, свет лампы рассеивается на его
 // внутренней стороне — поэтому видно, как тьма шевелится. Чем меньше свет, тем она выше и ближе.
 import {
-  Data3DTexture, HalfFloatType, LinearFilter, OrthographicCamera, RedFormat, RepeatWrapping, ShaderMaterial, Vector3,
+  Data3DTexture, HalfFloatType, LinearFilter, OrthographicCamera, RedFormat, RepeatWrapping, ShaderMaterial, Vector2, Vector3,
   WebGLRenderer, WebGLRenderTarget,
 } from 'three';
 import { FullScreenQuad, Pass } from 'three/addons/postprocessing/Pass.js';
@@ -48,13 +48,20 @@ uniform int uSteps;
 #define GLOW_MAX ${GLOW_MAX}
 uniform sampler2D tDepth; uniform sampler3D uNoise;
 uniform vec3 uCamPos, uCamRight, uCamUp, uCamFwd;
-uniform float uNear, uFar, uTime, uPress, uTop, uSigma, uAlbedo, uHaze, uBillow;
+uniform float uNear, uFar, uTime, uPress, uTop, uSigma, uAlbedo, uBillow;
 uniform vec4 uLights[DARK_MAX]; uniform int uLightCount;
 uniform vec4 uTendrils[TEND_MAX]; uniform vec2 uLamp;
 uniform vec3 uGlowPos[GLOW_MAX]; uniform vec3 uGlowCol[GLOW_MAX]; uniform float uGlowDist[GLOW_MAX];
 varying vec2 vUv;
 
 float noise(vec3 p){ return texture(uNoise, p / 16.0).r; }
+
+/** Метры до места, где поверхность уже заведомо чёрная (отрицательно — ещё может быть свет). */
+float gap(vec2 xz){
+  float g = 99.0;
+  for (int k = 0; k < DARK_MAX; k++) { if (k >= uLightCount) break; vec4 L = uLights[k]; g = min(g, length(xz - L.xz) - L.w * 1.45); }
+  return g;
+}
 
 void main(){
   float depth = texture2D(tDepth, vUv).r;
@@ -67,31 +74,46 @@ void main(){
   vec3 scat = vec3(0.0);
   float T = 1.0;
   if (t1 > t0) {
-    float ds = (t1 - t0) / float(uSteps);
+    float len = t1 - t0;
     float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    vec3 pa = ro + uCamFwd * t0, pb = ro + uCamFwd * t1;
+    // луч целиком в глубокой темноте: под ним всё равно чёрное, хватит грубой оценки
+    bool deep = min(gap(pa.xz), min(gap(pb.xz), gap((pa.xz + pb.xz) * 0.5))) > 1.3;
+    int steps = deep ? 4 : uSteps;
+    float prev = 0.0;
     for (int i = 0; i < MAX_STEPS; i++) {
-      if (i >= uSteps) break;
-      vec3 p = ro + uCamFwd * (t0 + (float(i) + jit) * ds);
+      if (i >= steps) break;
+      // шаги сгущаются к полу: там низкая стена и позёмка, их нельзя проскочить
+      float u1 = float(i + 1) / float(steps), s1 = u1 * (2.0 - u1);
+      float uj = (float(i) + jit) / float(steps), sj = uj * (2.0 - uj);
+      float ds = (s1 - prev) * len; prev = s1;
+      vec3 p = ro + uCamFwd * (t0 + sj * len);
+      vec3 q = p * vec3(0.42, 0.55, 0.42);
+      float n1 = noise(q + vec3(uTime * 0.05, -uTime * 0.085, -uTime * 0.04));
+      vec2 rl = p.xz - uLamp;
+      float facing = dot(rl / max(length(rl), 0.001), vec2(0.7071));
+      // со стороны камеры стена низкая (иначе закроет героя), с дальней — нависает
+      float hLim = mix(top, 0.45 + 0.3 * uPress, smoothstep(-0.35, 0.6, facing));
+      if (deep) {
+        float rhoD = max(1.0 - smoothstep(0.45, 1.0, p.y / hLim + (n1 - 0.5) * 0.9), (1.0 - smoothstep(0.0, 0.35 + 0.7 * uPress + 0.3 * n1, p.y)) * (0.7 + 0.3 * uPress));
+        T *= exp(-rhoD * uSigma * ds);
+        if (T < 0.02) { T = 0.0; break; }
+        continue;
+      }
       // насколько точка далеко от ближайшего света (1 — на границе круга)
       float dn = 9.0;
       for (int k = 0; k < DARK_MAX; k++) { if (k >= uLightCount) break; vec4 L = uLights[k]; dn = min(dn, length(p.xz - L.xz) / max(L.w, 0.001)); }
-      vec3 q = p * vec3(0.42, 0.55, 0.42);
-      float n1 = noise(q + vec3(uTime * 0.05, -uTime * 0.085, -uTime * 0.04));
       float n2 = noise(q * 2.6 + vec3(-uTime * 0.1, -uTime * 0.17, uTime * 0.07));
-      float n3 = noise(q * 6.3 + vec3(uTime * 0.16, -uTime * 0.3, -uTime * 0.12));
-      float n = n1 * 0.5 + n2 * 0.32 + n3 * 0.18;
+      float n = n1 * 0.6 + n2 * 0.4;
       // волны идут по дыму внутрь, к лампе; при малом свете — чаще и глубже
       float surge = sin(dn * 6.0 - uTime * (0.7 + uPress * 1.4) + n1 * 7.0) * 0.5 + 0.5;
       float breath = sin(uTime * (0.55 + 0.9 * uPress)) * (0.02 + 0.07 * uPress);
       float edge = dn + (n - 0.5) * uBillow - surge * (0.06 + 0.2 * uPress) * smoothstep(0.35, 1.0, dn) + breath;
       float wall = smoothstep(0.84 - 0.14 * uPress, 1.08 - 0.1 * uPress, edge);   // при малом свете стена подступает ближе
-      // со стороны камеры стена низкая (иначе закроет героя), с дальней — нависает
-      vec2 rl = p.xz - uLamp;
-      float facing = dot(rl / max(length(rl), 0.001), vec2(0.7071));
-      float hLim = mix(top, 0.45 + 0.3 * uPress, smoothstep(-0.35, 0.6, facing));
+      wall = max(wall, smoothstep(1.2, 1.4, dn));                                  // дальше края — сплошная, без просветов
       wall *= 1.0 - smoothstep(0.45, 1.0, p.y / hLim + (n - 0.5) * 0.9);
       // позёмка: по полу тьма затекает в круг пальцами
-      float fingers = smoothstep(0.5, 0.72, n2 * 0.6 + n3 * 0.4 + (dn - 0.62 + 0.2 * uPress) * 0.9);
+      float fingers = smoothstep(0.5, 0.72, n2 * 0.75 + n1 * 0.25 + (dn - 0.62 + 0.2 * uPress) * 0.9);
       float creep = fingers * (1.0 - smoothstep(0.0, 0.35 + 0.7 * uPress + 0.3 * n1, p.y)) * smoothstep(0.22 - 0.12 * uPress, 0.55, dn);
       float rho = max(wall, creep * (0.7 + 0.3 * uPress));
       // языки: тьма тянется к лампе
@@ -106,20 +128,37 @@ void main(){
         float body = (1.0 - smoothstep(wdt * 0.4, wdt, perp + (n - 0.5) * 0.7)) * Tn.w * (1.0 - smoothstep(0.35, 1.2 + max(along, 0.0) * 0.5, p.y + (n2 - 0.5) * 0.6));
         rho = max(rho, body);
       }
-      float a = exp(-rho * uSigma * ds);
-      // свет на дыме: лампа и живые огни
-      vec3 Li = vec3(0.0);
-      for (int k = 0; k < GLOW_MAX; k++) {
-        vec3 v = uGlowPos[k] - p;
-        float d2 = dot(v, v);
-        Li += uGlowCol[k] / (1.0 + d2 * 0.5) * (1.0 - smoothstep(uGlowDist[k] * 0.45, uGlowDist[k], sqrt(d2)));
+      if (rho > 0.002) {
+        float a = exp(-rho * uSigma * ds);
+        // свет на дыме: лампа и живые огни
+        vec3 Li = vec3(0.0);
+        for (int k = 0; k < GLOW_MAX; k++) {
+          vec3 v = uGlowPos[k] - p;
+          float d2 = dot(v, v);
+          Li += uGlowCol[k] / (1.0 + d2 * 0.5) * (1.0 - smoothstep(uGlowDist[k] * 0.45, uGlowDist[k], sqrt(d2)));
+        }
+        scat += T * (1.0 - a) * uAlbedo * (0.35 + 1.6 * n2 * n1) * Li;
+        T *= a;
+        if (T < 0.02) { T = 0.0; break; }
       }
-      scat += T * ((1.0 - a) * uAlbedo * (0.35 + 1.6 * n3 * n2) + uHaze * ds) * Li;
-      T *= a;
-      if (T < 0.02) { T = 0.0; break; }
     }
   }
   gl_FragColor = vec4(scat, T);
+}`;
+
+// Сглаживание дыма в его же малом буфере: разброс шагов луча усредняется по соседям,
+// а соседи с другой глубины (силуэт героя, край камня) в расчёт не берутся — без ореолов.
+const BLUR = /* glsl */ `
+uniform sampler2D tFog, tDepth; uniform vec2 uTexel; uniform float uSpan; varying vec2 vUv;
+void main(){
+  float zc = texture2D(tDepth, vUv).r;
+  vec4 sum = vec4(0.0); float wsum = 0.0;
+  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    vec2 uv = vUv + vec2(float(x), float(y)) * uTexel;
+    float w = 1.0 / (1.0 + abs(texture2D(tDepth, uv).r - zc) * uSpan * 6.0);
+    sum += texture2D(tFog, uv) * w; wsum += w;
+  }
+  gl_FragColor = sum / wsum;
 }`;
 
 const COMP = /* glsl */ `
@@ -131,7 +170,9 @@ void main(){
 
 export class VolumePass extends Pass {
   private low: WebGLRenderTarget;
+  private soft: WebGLRenderTarget;
   private fog: ShaderMaterial;
+  private blur: ShaderMaterial;
   private comp: ShaderMaterial;
   private quad: FullScreenQuad;
   private right = new Vector3(); private up = new Vector3();
@@ -142,7 +183,7 @@ export class VolumePass extends Pass {
   press = 0;
 
   /** Уровни качества: [масштаб буфера, число шагов луча]. Чем слабее устройство, тем выше уровень. */
-  static readonly LEVELS: [number, number][] = [[0.5, 14], [0.4, 10], [0.3, 7]];
+  static readonly LEVELS: [number, number][] = [[0.5, 12], [0.4, 9], [0.33, 7]];
   level: number;
   private size = { w: 4, h: 4 };
 
@@ -151,25 +192,33 @@ export class VolumePass extends Pass {
     this.level = level;
     this.low = new WebGLRenderTarget(4, 4, { type: HalfFloatType, depthBuffer: false });
     this.low.texture.minFilter = this.low.texture.magFilter = LinearFilter;
+    this.soft = new WebGLRenderTarget(4, 4, { type: HalfFloatType, depthBuffer: false });
+    this.soft.texture.minFilter = this.soft.texture.magFilter = LinearFilter;
     this.fog = new ShaderMaterial({
       vertexShader: VERT, fragmentShader: fogFrag, depthTest: false, depthWrite: false,
       uniforms: {
         tDepth: { value: null }, uNoise: { value: noiseTexture() }, uSteps: { value: VolumePass.LEVELS[level][1] },
         uCamPos: { value: new Vector3() }, uCamRight: { value: new Vector3() }, uCamUp: { value: new Vector3() }, uCamFwd: { value: new Vector3() },
         uNear: { value: 0.1 }, uFar: { value: 200 }, uTime: darkU.uTime, uPress: { value: 0 },
-        uTop: { value: 3.4 }, uSigma: { value: 4.2 }, uAlbedo: { value: 0.0035 }, uHaze: { value: 0.0 }, uBillow: { value: 0.7 },
+        uTop: { value: 3.4 }, uSigma: { value: 4.2 }, uAlbedo: { value: 0.0035 }, uBillow: { value: 0.7 },
         uLights: darkU.uLights, uLightCount: darkU.uLightCount, uTendrils: darkU.uTendrils, uLamp: darkU.uLamp,
         uGlowPos: { value: this.glowPos }, uGlowCol: { value: this.glowCol }, uGlowDist: { value: this.glowDist },
       },
     });
-    this.comp = new ShaderMaterial({ vertexShader: VERT, fragmentShader: COMP, depthTest: false, depthWrite: false, uniforms: { tDiffuse: { value: null }, tFog: { value: this.low.texture } } });
+    this.blur = new ShaderMaterial({
+      vertexShader: VERT, fragmentShader: BLUR, depthTest: false, depthWrite: false,
+      uniforms: { tFog: { value: this.low.texture }, tDepth: { value: null }, uTexel: { value: new Vector2() }, uSpan: { value: 200 } },
+    });
+    this.comp = new ShaderMaterial({ vertexShader: VERT, fragmentShader: COMP, depthTest: false, depthWrite: false, uniforms: { tDiffuse: { value: null }, tFog: { value: this.soft.texture } } });
     this.quad = new FullScreenQuad(this.fog);
   }
 
   setSize(w: number, h: number): void {
     this.size.w = w; this.size.h = h;
     const k = VolumePass.LEVELS[this.level][0];
-    this.low.setSize(Math.max(2, Math.round(w * k)), Math.max(2, Math.round(h * k)));
+    const lw = Math.max(2, Math.round(w * k)), lh = Math.max(2, Math.round(h * k));
+    this.low.setSize(lw, lh); this.soft.setSize(lw, lh);
+    (this.blur.uniforms.uTexel.value as Vector2).set(1 / lw, 1 / lh);
   }
   /** Понизить качество на ступень (устройство не тянет). Возвращает false, если ниже некуда. */
   degrade(): boolean {
@@ -192,11 +241,15 @@ export class VolumePass extends Pass {
     this.quad.material = this.fog;
     renderer.setRenderTarget(this.low);
     this.quad.render(renderer);
+    this.blur.uniforms.tDepth.value = readBuffer.depthTexture; this.blur.uniforms.uSpan.value = c.far - c.near;
+    this.quad.material = this.blur;
+    renderer.setRenderTarget(this.soft);
+    this.quad.render(renderer);
     this.comp.uniforms.tDiffuse.value = readBuffer.texture;
     this.quad.material = this.comp;
     renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
     this.quad.render(renderer);
   }
 
-  dispose(): void { this.low.dispose(); this.fog.dispose(); this.comp.dispose(); this.quad.dispose(); }
+  dispose(): void { this.low.dispose(); this.soft.dispose(); this.fog.dispose(); this.blur.dispose(); this.comp.dispose(); this.quad.dispose(); }
 }

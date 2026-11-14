@@ -25,6 +25,11 @@ export class Hud {
   private opts = el('div', '', 'opts');
   private wick = el('div', 'wick', 'fade hidden');
   private wickKnob = el('i');
+  private hands = el('div', 'hands', 'fade hidden');
+  private speak = el('div', 'speak');
+  private bPour = el('button', 'bPour');
+  private bShield = el('button', 'bShield');
+  private nextBtn = el('button', '', 'next');
   private goal = el('div', 'goal', 'fade hidden');
   private goalText = el('span');
   private goalArrow = el('i');
@@ -43,7 +48,20 @@ export class Hud {
 
   constructor(private root: HTMLElement) {
     this.oil.append(this.oilFill);
-    this.dialog.append(this.who, this.txt, this.opts);
+    this.nextBtn.textContent = TX.next;
+    this.nextBtn.addEventListener('click', () => this.input.press('Space'));
+    this.dialog.append(this.who, this.txt, this.nextBtn, this.opts);
+    // руки: склянка (держать — долить или разжечь) и ладонь (держать — прикрыть лампу)
+    this.bPour.innerHTML = '<i></i><b>0</b><kbd>R</kbd><span></span>';
+    this.bShield.innerHTML = '<i></i><kbd>Shift</kbd><span></span>';
+    this.bPour.setAttribute('aria-label', TX.btnPour); this.bShield.setAttribute('aria-label', TX.btnShield);
+    this.hands.append(this.bPour, this.bShield);
+    const holdBtn = (b: HTMLElement, code: string) => {
+      b.addEventListener('pointerdown', (e) => { e.preventDefault(); try { b.setPointerCapture(e.pointerId); } catch { /* палец уже отпущен */ } this.input.hold(code, true); });
+      for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(ev, () => this.input.hold(code, false));
+      b.addEventListener('contextmenu', (e) => e.preventDefault());
+    };
+    holdBtn(this.bPour, 'KeyR'); holdBtn(this.bShield, 'ShiftLeft');
     const sun = el('span'); sun.textContent = '☀';
     const moon = el('span'); moon.textContent = '☾';
     this.wick.append(sun, this.wickKnob, moon);
@@ -52,7 +70,10 @@ export class Hud {
     pauseBtn.setAttribute('aria-label', TX.paused);
     pauseBtn.addEventListener('click', () => this.onPause?.());
     this.goal.append(this.goalText, this.goalArrow);
-    root.append(this.area, this.mark, this.oil, this.goal, this.hintEl, this.wick, this.dialog, this.act, pauseBtn);
+    this.speak.innerHTML = '<i></i><i></i><i></i>';
+    root.append(this.area, this.mark, this.speak, this.oil, this.goal, this.hintEl, this.wick, this.hands, this.dialog, this.act, pauseBtn);
+    // во время разговора тап в любое место экрана — следующая реплика
+    this.area.addEventListener('pointerdown', () => { if (this.onDone) this.input.press('Space'); });
     this.act.addEventListener('click', () => this.input.press('Space'));
     this.dialog.addEventListener('pointerdown', (e) => { if (!(e.target as HTMLElement).closest('button')) this.input.press('Space'); });
     // ползунок фитиля: тянуть вверх — ярче
@@ -67,10 +88,30 @@ export class Hud {
   }
 
   get touch(): boolean { return document.body.classList.contains('touch'); }
+  /** Кто сейчас говорит (подпись над репликой). */
+  /** Значок голоса над тем, кто сейчас говорит (x, y — пиксели экрана; null — никто). */
+  setSpeak(x: number | null, y = 0): void {
+    this.speak.classList.toggle('on', x !== null);
+    if (x !== null) this.speak.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%)`;
+  }
+  get speakerName(): string { return this.busy ? this.who.textContent ?? '' : ''; }
   /** Открыт ли диалог или выбор. */
   get busy(): boolean { return this.onDone !== null || this.onChoice !== null; }
 
-  showHud(on: boolean): void { this.oil.classList.toggle('hidden', !on); this.wick.classList.toggle('hidden', !on); if (!on) this.goal.classList.add('hidden'); }
+  showHud(on: boolean): void { this.oil.classList.toggle('hidden', !on); this.wick.classList.toggle('hidden', !on); this.hands.classList.toggle('hidden', !on); if (!on) this.goal.classList.add('hidden'); }
+  /** Кнопки рук: сколько склянок, ход долива, горит ли лампа, прикрыта ли, идёт ли сквозняк. */
+  setHands(flasks: number, pour: number, lit: boolean, shielding: boolean, windy: boolean): void {
+    const p = this.bPour;
+    (p.children[1] as HTMLElement).textContent = lit ? String(flasks) : '!';
+    (p.lastChild as HTMLElement).textContent = lit ? TX.btnPour : TX.btnRelight;
+    p.style.setProperty('--p', pour.toFixed(3));
+    p.classList.toggle('empty', lit && flasks === 0);
+    p.classList.toggle('alert', !lit);
+    (this.bShield.lastChild as HTMLElement).textContent = TX.btnShield;
+    this.bShield.classList.toggle('on', shielding);
+    this.bShield.classList.toggle('alert', windy && !shielding);
+    this.hands.classList.toggle('away', this.busy);           // в разговоре руки заняты словами: кнопки не мешают тексту
+  }
   /** Цель и прогресс: всегда на экране. angle — куда тянет сквозняк (рад, 0 — вверх экрана), null — нет стрелки. */
   setGoal(html: string, angle: number | null): void {
     if (this.goalText.innerHTML !== html) this.goalText.innerHTML = html;
@@ -114,6 +155,7 @@ export class Hud {
   setWick(v: number, locked: boolean): void {
     this.wickKnob.style.bottom = `calc(26px + (100% - 52px) * ${v.toFixed(3)} - 13px)`;
     this.wick.classList.toggle('locked', locked);
+    this.wick.classList.toggle('away', this.busy);
   }
 
   hint(text: string, secs = 6): void {
@@ -129,10 +171,12 @@ export class Hud {
   }
 
   /** Реплики идут сами; Пробел/тап — быстрее. */
-  say(name: string, lines: string[], done: () => void): void {
+  say(name: string, lines: string[], done: () => void, centered = false): void {
     this.queue = lines.slice();
     this.onDone = done;
     this.who.textContent = name;
+    this.dialog.classList.toggle('centered', centered);
+    this.nextBtn.style.display = '';
     this.opts.replaceChildren();
     this.dialog.classList.remove('hidden');
     this.next();
@@ -154,6 +198,8 @@ export class Hud {
   choose(name: string, text: string, choices: Choice[], cb: (i: number) => void): void {
     this.who.textContent = name;
     this.txt.textContent = text;
+    this.dialog.classList.remove('centered');
+    this.nextBtn.style.display = 'none';
     this.opts.replaceChildren();
     this.nChoices = choices.length;
     this.shownAt = performance.now();
@@ -178,7 +224,7 @@ export class Hud {
     const w = el('div', '', 'whisper');
     w.textContent = text;
     const left = sideX < 0.5 ? 6 + Math.random() * 22 : 58 + Math.random() * 20;
-    w.style.left = `${left}%`; w.style.top = `${18 + Math.random() * 50}%`;
+    w.style.left = `${left}%`; w.style.top = `${30 + Math.random() * 40}%`;
     this.root.append(w);
     setTimeout(() => w.remove(), 5200);
   }

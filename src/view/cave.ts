@@ -305,13 +305,22 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
     }
   }
 
+  // по кускам 16×16 м: рисуется и отбрасывает тень только то, что рядом с камерой и лампой
   const add = (geo: BufferGeometry, mat: MeshStandardMaterial, arr: Inst[], shadow = true) => {
-    if (!arr.length) return;
-    const im = new InstancedMesh(geo, mat, arr.length);
-    arr.forEach((it, k) => { im.setMatrixAt(k, it.m); im.setColorAt(k, it.c); });
-    im.castShadow = shadow; im.receiveShadow = true; im.frustumCulled = false;
-    group.add(im);
-    trash.push(im);
+    const cells = new Map<number, Inst[]>();
+    for (const it of arr) {
+      const k = Math.floor(it.m.elements[12] / 16) + 64 * Math.floor(it.m.elements[14] / 16);
+      const list = cells.get(k);
+      if (list) list.push(it); else cells.set(k, [it]);
+    }
+    for (const list of cells.values()) {
+      const im = new InstancedMesh(geo, mat, list.length);
+      list.forEach((it, k) => { im.setMatrixAt(k, it.m); im.setColorAt(k, it.c); });
+      im.castShadow = shadow; im.receiveShadow = true;
+      im.computeBoundingSphere();
+      group.add(im);
+      trash.push(im);
+    }
   };
   add(boulderGeo, rockMat, boulders); add(spikeGeo, rockMat, spikes); add(colGeo, rockMat, columns);
   add(pebbleGeo, rockMat, pebbles); add(boneGeo, boneMat, bones, false);

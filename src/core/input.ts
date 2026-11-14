@@ -8,6 +8,8 @@ export class Input {
   private pressed = new Set<string>();
   private ptr = { id: -1, x: 0, y: 0, ox: 0, oy: 0 };   // палец и основание стика
   anyInput = false;
+  /** во время разговора стик не появляется: касание листает реплики */
+  blockStick = false;
 
   constructor(area?: HTMLElement, private mark?: HTMLElement) {
     addEventListener('keydown', (e) => {
@@ -33,6 +35,7 @@ export class Input {
     };
     el.addEventListener('pointerdown', (e) => {
       this.anyInput = true;
+      if (this.blockStick) return;
       this.ptr.id = e.pointerId; this.ptr.x = this.ptr.ox = e.clientX; this.ptr.y = this.ptr.oy = e.clientY;
       el.setPointerCapture(e.pointerId);
       show(true);
@@ -51,6 +54,8 @@ export class Input {
 
   /** Виртуальное нажатие (кнопки на экране). */
   press(code: string): void { this.pressed.add(code); this.anyInput = true; }
+  /** Экранная кнопка зажата / отпущена. */
+  hold(code: string, on: boolean): void { if (on) this.keys.add(code); else this.keys.delete(code); this.anyInput = true; }
   /** Было ли нажатие с прошлого кадра. */
   hit(...codes: string[]): boolean { return codes.some((c) => this.pressed.has(c)); }
   down(...codes: string[]): boolean { return codes.some((c) => this.keys.has(c)); }

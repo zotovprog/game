@@ -24,9 +24,35 @@ export class Story {
   private name(id: 'efim' | 'vera' | 'mila' | 'family'): string {
     return this.g.flags.has(`${id}Name`) ? TX[id].realName : TX[id].name;
   }
+  /** Чья это реплика (чтобы у говорящего двигались голова и руки). */
+  speakerOf(name: string): Human | null {
+    const g = this.g;
+    if (!name) return null;
+    if (name === TX.you) return g.hero;
+    if (name === TX.efim.name || name === TX.efim.realName) return g.npcs.efim.h;
+    if (name === TX.vera.name || name === TX.vera.realName) return g.npcs.vera.h;
+    if (name === TX.mila.name || name === TX.mila.realName) return g.mila.h;
+    if (name === TX.family.name || name === TX.family.realName) return g.family.father;
+    if (name === TX.family.mother) return g.family.mother;
+    if (name === TX.family.boy) return g.npcs.boy.h;
+    return null;
+  }
+  /** Короткая реплика на ходу: кто сказал и до какого момента он «говорит». */
+  barker: { h: Human; until: number } | null = null;
+  /** Выбор: выбранный ответ герой произносит сам — видно, что это его слова. */
+  private ask(name: string, text: string, choices: Choice[], cb: (i: number) => void): void {
+    const g = this.g;
+    g.hud.choose(name, text, choices, (i) => {
+      const label = choices[i].label;
+      if (label === TX.bowl.back) { cb(i); return; }
+      g.hud.say(TX.you, [label], () => cb(i));
+    });
+  }
   private line(who: string, text: string, voice: Voice, secs = 4.5): void {
     this.g.hud.hint(`${who}: «${text}»`, secs);
     this.g.sfx.voice(voice);
+    const h = this.speakerOf(who);
+    if (h) this.barker = { h, until: performance.now() + 2600 };
   }
 
   // ---------- память пещеры
@@ -74,10 +100,10 @@ export class Story {
     g.hud.screen(null);
     g.mode = 'intro';
     g.stage.fade = 1;
-    TX.intro.forEach((line, i) => g.after(0.8 + i * 3.2, () => g.hud.hint(line, 2.6)));
-    const t0 = 0.8 + TX.intro.length * 3.2 - 2.4;
-    for (let i = 0; i <= 30; i++) g.after(t0 + i * 0.1, () => { g.stage.fade = 1 - i / 30; });
-    g.after(t0 + 3.2, () => { g.mode = 'play'; g.hud.hint(g.hud.touch ? TX.hintMoveTouch : TX.hintMoveKb, 7); });
+    g.after(0.7, () => g.hud.say('', TX.intro, () => {
+      for (let i = 0; i <= 30; i++) g.after(i * 0.1, () => { g.stage.fade = 1 - i / 30; });
+      g.after(1.6, () => { g.mode = 'play'; g.hud.hint(g.hud.touch ? TX.hintMoveTouch : TX.hintMoveKb, 7); });
+    }, true));
   }
 
   /** Для съёмки и отладки: сразу с лампой в руке. */
@@ -101,7 +127,7 @@ export class Story {
       g.hud.hint(TX.goalHint, 9);
       g.after(1.6, () => { g.hud.whisper(TX.whispers[0], 0.8); g.sfx.whisper(0.6, 0.1); });
       g.after(11, () => g.hud.hint(g.hud.touch ? TX.hintWickTouch : TX.hintWickKb, 9));
-    });
+    }, true);
   }
 
   examineDead(): void {
@@ -284,7 +310,7 @@ export class Story {
     const g = this.g, n = g.npcs.efim, tx = TX.efim;
     n.dir = Math.atan2(g.pos.x - n.x, g.pos.z - n.z);
     g.sfx.voice('efim');
-    const ask = () => g.hud.choose(this.name('efim'), tx.talk[2], [{ label: tx.yes, note: tx.yesNote }, { label: tx.no, note: tx.noNote }], (i) => {
+    const ask = () => this.ask(this.name('efim'), tx.talk[2], [{ label: tx.yes, note: tx.yesNote }, { label: tx.no, note: tx.noNote }], (i) => {
       g.sfx.voice('efim');
       if (i === 0) {
         if (g.lamp.oil < T.lamp.giveCost + 4) { g.hud.say(this.name('efim'), [tx.poor], () => {}); return; }
@@ -308,7 +334,7 @@ export class Story {
     // ты пришёл с её дочерью на руках
     if (g.carrying) {
       g.flags.add('veraName'); g.flags.add('milaName');
-      g.hud.say(tx.realName, tx.reunionAsk, () => g.hud.choose(tx.realName, '', [{ label: tx.yes, note: tx.yesNote }, { label: TX.efim.no, note: 'нести девочку самому' }], (i) => {
+      g.hud.say(tx.realName, tx.reunionAsk, () => this.ask(tx.realName, '', [{ label: tx.yes, note: tx.yesNote }, { label: TX.efim.no, note: 'нести девочку самому' }], (i) => {
         g.sfx.voice('vera');
         if (i === 0 && g.lamp.oil >= T.lamp.giveCost + 4) {
           this.giveCandle(n, T.lamp.giveCost);
@@ -322,7 +348,7 @@ export class Story {
       }));
       return;
     }
-    const ask = () => g.hud.choose(this.name('vera'), tx.talk[2], [{ label: tx.yes, note: tx.yesNote }, { label: tx.no, note: tx.noNote }], (i) => {
+    const ask = () => this.ask(this.name('vera'), tx.talk[2], [{ label: tx.yes, note: tx.yesNote }, { label: tx.no, note: tx.noNote }], (i) => {
       g.sfx.voice('vera');
       if (i === 0 && g.lamp.oil >= T.lamp.giveCost + 4) {
         this.giveCandle(n, T.lamp.giveCost);
@@ -352,7 +378,7 @@ export class Story {
     const g = this.g, f = g.family, tx = TX.family;
     g.sfx.voice('father');
     const share = Math.max(12, Math.round(g.lamp.oil * T.lamp.familyShare));
-    const ask = () => g.hud.choose(tx.mother, tx.motherLine, [
+    const ask = () => this.ask(tx.mother, tx.motherLine, [
       { label: tx.fire, note: tx.fireNote }, { label: tx.boyOpt, note: tx.boyNote }, { label: tx.no, note: tx.noNote },
     ], (i) => {
       if (i === 0) {
@@ -399,10 +425,10 @@ export class Story {
     const g = this.g, tx = TX.mila;
     g.sfx.voice('mila');
     g.flags.add('milaMet');
-    g.hud.say(tx.name, tx.talk, () => g.hud.choose(tx.name, tx.talk[1], [{ label: tx.lie }, { label: tx.truth }], (a) => {
+    g.hud.say(tx.name, tx.talk, () => this.ask(tx.name, tx.talk[1], [{ label: tx.lie }, { label: tx.truth }], (a) => {
       g.sfx.voice('mila');
       g.flags.add(a === 0 ? 'milaLie' : 'milaTruth');
-      g.hud.say(tx.name, [a === 0 ? tx.afterLie : tx.afterTruth], () => g.hud.choose(tx.name, '', [
+      g.hud.say(tx.name, [a === 0 ? tx.afterLie : tx.afterTruth], () => this.ask(tx.name, '', [
         { label: tx.carry, note: tx.carryNote }, { label: tx.leave, note: tx.leaveNote },
       ], (i) => {
         g.sfx.voice('mila');
@@ -454,7 +480,7 @@ export class Story {
     const opts: Choice[] = [{ label: tx.yes, note: tx.yesNote }];
     if (g.flags.has('toy') && !asked) opts.push({ label: tx.ask, note: tx.askNote });
     opts.push({ label: tx.no, note: tx.noNote });
-    g.hud.choose(tx.name, '', opts, (i) => {
+    this.ask(tx.name, '', opts, (i) => {
       const pick = opts[i].label;
       g.sfx.voice('shade');
       if (pick === tx.ask) {
@@ -510,7 +536,7 @@ export class Story {
       else if ((c.t += dt) >= T.party.holeTime) {
         boy.h.root.visible = true; boy.state = 'follow'; boy.goal = null;
         c.h.done = true; c.h.busy = false; this.crawl = null;
-        g.lamp.oil = Math.min(100, g.lamp.oil + T.party.holeOil);
+        if (g.lamp.flasks < T.lamp.maxFlasks) g.lamp.flasks++; else g.lamp.oil = Math.min(100, g.lamp.oil + T.party.holeOil);
         g.sfx.pickup();
         this.line(TX.family.boy, TX.hole.done, 'boy', 4);
       }
@@ -661,18 +687,8 @@ export class Story {
     }
   }
 
-  /** Удар: сквозняк задувает лампу, лица смыкаются, пламя возвращается. */
-  private gustScare(): void {
-    const g = this.g;
-    g.sfx.gust();
-    g.hud.hint(TX.gust, 2.5);
-    for (let i = 0; i <= 6; i++) g.after(0.25 + i * 0.05, () => { g.gust = i / 6; });
-    g.after(1.3, () => {
-      g.sfx.stinger(); g.stage.shake = 0.8; g.chroma = 1;
-      for (let k = 0; k < 3; k++) { const a = k * 2.1 + 0.7; g.dark.lunge(g.pos.x + Math.cos(a) * 5, g.pos.z + Math.sin(a) * 5); }
-    });
-    g.after(2.6, () => { g.gust = 0; g.sfx.relight(); g.dark.scatter(); g.lamp.oil = Math.max(3, g.lamp.oil - 3); });
-  }
+  /** Первый сквозняк в пустоте: учит прикрывать лампу ладонью. */
+  private gustScare(): void { this.g.forceGust(); }
 
   /** Расплата: те, мимо кого ты прошёл, возвращаются. Обычный свет их не держит. */
   private returned(): void {
@@ -730,7 +746,7 @@ export class Story {
         opts.push({ label: tx.leave, note: tx.leaveNote });
       }
       opts.push({ label: tx.back });
-      g.hud.choose('', '', opts, (i) => {
+      this.ask('', '', opts, (i) => {
         const pick = opts[i].label;
         if (pick === tx.self) this.endStay();
         else if (pick === tx.efim) g.hud.say(TX.efim.realName, TX.efim.stay, () => this.endLeave('efim'));

@@ -16,7 +16,7 @@ export class Human {
   readonly hand = new Group();       // сюда вешается лампа/огарок
   private legL = new Group();
   private legR = new Group();
-  private head: Mesh;
+  readonly head: Mesh;
   private phase = 0;
   private walk = 0;                  // сглаженная доля ходьбы 0..1
   private pose: Pose = 'stand';
@@ -24,6 +24,13 @@ export class Human {
   private lieK = 0;                  // 1 — лежит на спине
   private hunch: number;
   carrying = false;
+  /** 0..1 — говорит: кивает, поворачивает голову, жестикулирует свободной рукой */
+  talk = 0;
+  /** 0..1 — прикрывает лампу ладонью */
+  shield = 0;
+  /** 0..1 — доливает масло или разжигает: свободная рука у лампы */
+  pour = 0;
+  private talkK = 0; private shieldK = 0; private pourK = 0;
 
   constructor(opts: HumanOpts) {
     const cloakMat = darkify(new MeshStandardMaterial({ color: opts.cloak, roughness: 1, flatShading: true }));
@@ -115,6 +122,27 @@ export class Human {
       this.armR.rotation.x = s * 0.55 * w + 0.05 - 0.5 * k;
       this.armR.rotation.z = 0.08;
     }
-    this.head.rotation.x = -0.1 * k;
+    // речь: видно, кто говорит — голова кивает и поворачивается, свободная рука жестикулирует, корпус подаётся вперёд
+    this.talkK = damp(this.talkK, this.talk, 8, dt);
+    this.shieldK = damp(this.shieldK, this.shield, 12, dt);
+    this.pourK = damp(this.pourK, this.pour, 10, dt);
+    const tk = this.talkK, syl = Math.sin(t * 11.3) * 0.5 + Math.sin(t * 7.1 + 1.7) * 0.5;
+    this.head.rotation.x = -0.1 * k + tk * (0.08 + syl * 0.16);
+    this.head.rotation.y = tk * Math.sin(t * 2.1) * 0.45;
+    this.head.rotation.z = tk * Math.sin(t * 1.3 + 0.8) * 0.1;
+    this.body.rotation.x += tk * (0.07 + Math.sin(t * 2.6) * 0.05);
+    this.body.rotation.z += tk * Math.sin(t * 1.9) * 0.05;
+    this.body.position.y += tk * Math.abs(syl) * 0.022;
+    this.armL.rotation.x += tk * (-1.15 + syl * 0.45 + Math.sin(t * 3.1) * 0.3);
+    this.armL.rotation.z += tk * (-0.38 + Math.sin(t * 2.3) * 0.3);
+    if (!this.carrying) this.armR.rotation.x += tk * (-0.6 + Math.sin(t * 2.9 + 2) * 0.32);
+    // ладонь над лампой / долив: левая рука тянется к правой, к пламени
+    const hold = Math.max(this.shieldK, this.pourK);
+    if (hold > 0.01) {
+      this.armL.rotation.x += hold * (-1.15 - this.armL.rotation.x + Math.sin(t * 6) * 0.04 * this.pourK);
+      this.armL.rotation.z += hold * (0.62 - this.armL.rotation.z);
+      this.body.rotation.x += hold * 0.16;
+      this.head.rotation.x += hold * 0.28;
+    }
   }
 }

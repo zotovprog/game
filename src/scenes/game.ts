@@ -9,7 +9,7 @@ import { Style } from '../data/styles';
 import { TX } from '../data/texts';
 import { T } from '../data/tuning';
 import { Darkness, DarkWorld, SafeLight } from '../systems/dark';
-import { addOil, flamePower, isDead, LampState, lightRadius, newLamp, stepLamp } from '../systems/lamp';
+import { addOil, flamePower, isDead, LampState, lightRadius, newLamp, pourStep, stepLamp } from '../systems/lamp';
 import { Story } from '../systems/story';
 import { Hud } from '../ui/hud';
 import { buildCave } from '../view/cave';
@@ -105,6 +105,9 @@ export class Game {
   /** вал тьмы, идущий по следу героя в конце: s — на сколько метров он позади */
   readonly wave = { on: false, s: 99 };
   private lastPos = { x: 0, z: 0 };
+  /** сквозняк: ждёт, предупреждает, дует; snuff — насколько он сейчас пригибает пламя */
+  readonly wind = { phase: 'idle' as 'idle' | 'warn' | 'blow', t: 30, exposed: 0, snuff: 0 };
+
 
   constructor(readonly stage: Stage, readonly hud: Hud, readonly input: Input, readonly sfx: Sfx, readonly style: Style, readonly def: LevelDef, opts: { skip: boolean }) {
     const scene = stage.scene;
@@ -290,7 +293,7 @@ export class Game {
   setStood(): void { this.stood = true; }
   /** Мир глазами тьмы — нужен и сюжету (для появления «вернувшихся»). */
   world(active = true): DarkWorld {
-    return { px: this.pos.x, pz: this.pos.z, fx: this.face.x, fz: this.face.z, rx: this.stage.right.x, rz: this.stage.right.z, radius: this.radius, wick: this.lamp.wick, ember: false, active, dread: this.dread, repel: this.lamp.wick >= T.dread.repelWick && this.lamp.oil > 0, safe: [] };
+    return { px: this.pos.x, pz: this.pos.z, fx: this.face.x, fz: this.face.z, rx: this.stage.right.x, rz: this.stage.right.z, radius: this.radius, wick: this.lamp.wick, ember: false, active, dread: this.dread, repel: this.lamp.wick >= T.dread.repelWick && this.lamp.oil > 0 && this.lamp.lit && this.lamp.shield < 0.5, block: this.lamp.shield > 0.6, safe: [] };
   }
 
   pause(on: boolean): void {
@@ -324,7 +327,7 @@ export class Game {
     }
     const l = Math.hypot(dx, dz);
     const wading = this.grid.kindAt(this.pos.x, this.pos.z) === 'water' && this.grid.wallDist(this.pos.x, this.pos.z) > 1.1;
-    const sp = T.player.speed * (this.autoWalk ? 0.6 : 1) * (this.lamp.held ? 1 : 0.6) * (this.carrying ? T.player.carry : 1) * (wading ? T.player.wade : 1);
+    const sp = T.player.speed * (this.autoWalk ? 0.6 : 1) * (this.lamp.held ? 1 : 0.6) * (this.carrying ? T.player.carry : 1) * (wading ? T.player.wade : 1) * (1 - (1 - T.lamp.shieldSpeed) * this.lamp.shield);
     if (l > 0.01) {
       this.pos.x += dx * sp * dt; this.pos.z += dz * sp * dt;
       this.grid.collide(this.pos, T.player.radius);
@@ -417,6 +420,37 @@ export class Game {
     }
   }
 
+  /** Сквозняк: сначала слышно и видно, что он идёт, потом порыв. Не прикрыл лампу ладонью — гаснет. */
+  private runGust(dt: number, on: boolean): void {
+    const W = this.wind, G = T.gust, lamp = this.lamp;
+    if (!on) { W.snuff = damp(W.snuff, 0, 6, dt); return; }
+    if (W.phase === 'idle') {
+      W.snuff = damp(W.snuff, 0, 6, dt);
+      if ((W.t -= dt) > 0 || !lamp.lit || lamp.oil <= 0 || this.wave.on) return;
+      W.phase = 'warn'; W.t = this.flags.has('gustHint') ? G.warn : G.firstWarn; W.exposed = 0;
+      this.sfx.gustWarn();
+      if (!this.flags.has('gustHint')) { this.flags.add('gustHint'); this.hud.hint(this.hud.touch ? TX.gustHintTouch : TX.gustHintKb, 7); }
+    } else if (W.phase === 'warn') {
+      W.snuff = damp(W.snuff, 0.18 + 0.12 * Math.sin(performance.now() / 60), 8, dt);     // пламя заранее мечется
+      if ((W.t -= dt) <= 0) { W.phase = 'blow'; W.t = G.blow; this.sfx.gust(); this.stage.shake = Math.max(this.stage.shake, 0.3); }
+    } else {
+      const covered = lamp.shield > 0.6 || this.safeLights.some((s) => Math.hypot(s.x - this.pos.x, s.z - this.pos.z) < s.r * 0.6);
+      W.snuff = damp(W.snuff, covered ? 0.25 : 0.85, 10, dt);
+      if (!covered && lamp.lit && (W.exposed += dt) > G.exposed) {
+        lamp.lit = false; lamp.pour = 0;
+        this.sfx.snuff(); this.chroma = 0.8;
+        this.hud.hint(this.hud.touch ? TX.outHintTouch : TX.outHintKb, 8);
+      }
+      if ((W.t -= dt) <= 0) {
+        W.phase = 'idle';
+        const kind = this.grid.kindAt(this.pos.x, this.pos.z), [lo, hi] = G.every[kind] ?? G.every.rubble;
+        W.t = (lo + this.rng() * (hi - lo)) * (1.15 - 0.4 * this.dread);
+      }
+    }
+  }
+  /** Срежиссированный первый порыв (учит прикрывать лампу). */
+  forceGust(): void { if (this.wind.phase === 'idle') this.wind.t = 0; }
+
   /** Вал: в конце тьма идёт по твоему следу. Остановишься — накроет; отставших накрывает первыми. */
   private runWave(dt: number): void {
     const W = this.wave, moved = Math.hypot(this.pos.x - this.lastPos.x, this.pos.z - this.lastPos.z);
@@ -493,10 +527,12 @@ export class Game {
     // масло подбирается само: в панике не до кнопок
     for (const f of this.flasks) {
       if (f.taken || !this.lamp.held || this.dist(f.x, f.z) > 0.95) continue;
+      if (!f.own && this.lamp.flasks >= T.lamp.maxFlasks) { if (!this.flags.has('fullHint')) { this.flags.add('fullHint'); this.hud.hint(TX.flaskFull, 5); } continue; }
       f.taken = true; f.g.visible = false;
-      addOil(this.lamp, f.own ? T.lamp.ownLamp : T.lamp.flask);
       this.sfx.pickup();
-      this.hud.hint(f.own ? TX.ownLamp : TX.flask, 2.5);
+      if (f.own) { addOil(this.lamp, T.lamp.ownLamp); this.hud.hint(TX.ownLamp, 3); continue; }
+      this.lamp.flasks++;
+      if (!this.flags.has('flaskHint')) { this.flags.add('flaskHint'); this.hud.hint(this.hud.touch ? TX.flaskHintTouch : TX.flaskHintKb, 9); } else this.hud.hint(TX.flask, 2);
     }
   }
 
@@ -515,6 +551,7 @@ export class Game {
     for (let i = this.timers.length - 1; i >= 0; i--) { const tm = this.timers[i]; tm.t -= dt; if (tm.t <= 0) { this.timers.splice(i, 1); tm.fn(); } }
 
     const talking = hud.busy;
+    this.input.blockStick = talking;
     this.actLock = talking ? 0.7 : Math.max(0, this.actLock - dt);
     const live = this.mode === 'play' && !talking && !this.frozen;
     this.move(dt);
@@ -527,7 +564,18 @@ export class Game {
       lamp.wick = clamp(lamp.wick + this.input.wickHold * T.lamp.wickRate * dt + this.input.wickDelta, T.lamp.wickMin, T.lamp.wickMax);
     }
     this.input.wickDelta = 0; this.input.wickSet = null;
-    lamp.snuff = this.gust;
+    // руки: прикрыть лампу ладонью (держать) и долить/разжечь (держать, стоя на месте)
+    const hands = live && lamp.held;
+    lamp.shield = damp(lamp.shield, hands && this.input.down('ShiftLeft', 'ShiftRight', 'KeyC') ? 1 : 0, 9, dt);
+    const pouring = hands && this.input.down('KeyR') && this.speed01 < 0.05 && lamp.shield < 0.3;
+    const wasPour = lamp.pour;
+    const did = pourStep(lamp, dt, pouring);
+    if (pouring && wasPour === 0 && lamp.pour > 0) this.sfx.pour();
+    if (did === 'poured') { this.sfx.pickup(); this.sfx.relight(); this.chroma = 0.3; }
+    if (did === 'relit') { this.sfx.relight(); this.dark.scatter(); hud.hint(TX.relit, 3); }
+    this.hero.shield = lamp.shield; this.hero.pour = lamp.pour > 0 ? 1 : 0;
+    this.runGust(dt, live && lamp.held && this.flags.has('firstDark'));
+    lamp.snuff = Math.max(this.gust, this.wind.snuff);
     const wasOil = lamp.oil;
     let load = 0;
     for (const n of this.companions) if (n.state === 'follow') load += n.load;
@@ -607,13 +655,14 @@ export class Game {
 
     // тьма
     const w = this.world(lamp.held && this.mode === 'play' && !talking && this.dist(gp.x, gp.z) > 9 && this.dist(this.shade.x, this.shade.z) > (this.shade.state === 'wait' ? 7 : 0));
-    w.ember = this.ember || this.gust > 0.5; w.safe = safe;
+    w.ember = this.ember || this.gust > 0.5 || !lamp.lit; w.safe = safe;
+    if (lamp.pour > 0) for (const h of this.dark.hunters) h.cool -= dt;          // пока льёшь, она торопится
     if (inSafe) w.repel = true;
     const touched = this.dark.update(dt, w);
     if (touched && live && this.gust < 0.1) {
       if (this.ember) this.die();
       else {
-        lamp.oil = Math.max(0, lamp.oil - T.lamp.touchDrain * (touched.kind === 'shade' ? 1 : 1.6));
+        lamp.oil = Math.max(0, lamp.oil - (lamp.lit ? T.lamp.touchDrain : T.lamp.outDrain) * (touched.kind === 'shade' ? 1 : 1.6));
         this.sfx.touch(); S.shake = 0.8; this.chroma = 1;
         if (!this.flags.has('biteHint')) { this.flags.add('biteHint'); hud.hint(TX.biteHint, 8); }
         this.dark.dismiss(touched);
@@ -643,7 +692,8 @@ export class Game {
     this.pressure = damp(this.pressure, pr, this.mode === 'dead' ? 1.2 : 2.5, dt);
     S.pressure = clamp(this.pressure + this.sfx.beat * 0.045, 0, 1);
     S.dread = this.dread;
-    S.viewHTarget = this.mode === 'end' ? 17 : 14 - 3.2 * this.pressure;
+    // разговор: камера подходит ближе — видно, кто говорит и как
+    S.viewHTarget = this.mode === 'end' ? 17 : talking && hud.speakerName ? 9.4 : 14 - 3.2 * this.pressure;
     this.chroma = Math.max(0, this.chroma - dt * 1.6);
     S.chroma = this.chroma * 0.02 + (this.ember ? 0.003 : 0);
     const side = Math.cos(this.dark.nearestAngle) * S.right.x + Math.sin(this.dark.nearestAngle) * S.right.z;
@@ -666,10 +716,21 @@ export class Game {
     }
     hud.updateMarkers((x, z) => { _v.set(x, 1, z).project(S.camera); return [(_v.x * 0.5 + 0.5) * innerWidth, (1 - (_v.y * 0.5 + 0.5)) * innerHeight]; });
     hud.setOil(lamp.oil, lamp.oil <= T.lamp.lowOil);
+    hud.setHands(lamp.flasks, lamp.pour, lamp.lit || lamp.oil <= 0, lamp.shield > 0.5, this.wind.phase !== 'idle');
+    // видно, кто говорит: у говорящего двигаются голова и руки
+    const bk = this.story.barker;
+    const sp = talking ? this.story.speakerOf(hud.speakerName) : bk && performance.now() < bk.until ? bk.h : null;
+    this.hero.talk = sp === this.hero ? 1 : 0;
+    for (const n of Object.values(this.npcs)) n.h.talk = sp === n.h ? 1 : 0;
+    this.family.father.talk = sp === this.family.father ? 1 : 0; this.family.mother.talk = sp === this.family.mother ? 1 : 0;
+    this.mila.h.talk = sp === this.mila.h ? 1 : 0;
+    if (sp) { sp.head.getWorldPosition(_v); _v.y += 0.42; _v.project(S.camera); hud.setSpeak((_v.x * 0.5 + 0.5) * innerWidth, (1 - (_v.y * 0.5 + 0.5)) * innerHeight); } else hud.setSpeak(null);
     hud.setWick((lamp.wick - T.lamp.wickMin) / (T.lamp.wickMax - T.lamp.wickMin), this.carrying);
     window.__metrics = { mode: this.mode, oil: Math.round(lamp.oil), wick: +lamp.wick.toFixed(2), x: +this.pos.x.toFixed(1), z: +this.pos.z.toFixed(1), companions: this.companions.length, flags: [...this.flags] };
     this.input.endFrame();
-    S.render(dt, _focus.set(this.pos.x, 0, this.pos.z), this.lampWorld);
+    _focus.set(this.pos.x, 0, this.pos.z);
+    if (talking && hud.speakerName && this.lookAt) { _focus.x += clamp((this.lookAt.x - this.pos.x) * 0.5, -1.6, 1.6); _focus.z += clamp((this.lookAt.z - this.pos.z) * 0.5, -1.6, 1.6); }
+    S.render(dt, _focus, this.lampWorld);
   }
 }
 

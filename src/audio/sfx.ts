@@ -325,6 +325,17 @@ export class Sfx {
       }, i * 430 + Math.random() * 60);
     }
   }
+  /** Масло льётся в лампу. */
+  pour(): void {
+    if (!this.ctx) return;
+    for (let i = 0; i < 9; i++) setTimeout(() => this.ctx && this.tone('sine', 420 + i * 55 + Math.random() * 60, 300 + i * 40, 0.12, 0.05, 0.1, 0.2, 0.01), i * 200);
+  }
+  /** Сквозняк идёт: нарастающий свист — есть секунда, чтобы прикрыть лампу. */
+  gustWarn(): void {
+    if (!this.ctx) return;
+    this.burst(this.white, 'bandpass', 300, 1500, 1.6, 0.14, -0.6, 0.6, 3);
+    this.burst(this.brown, 'bandpass', 150, 500, 1.6, 0.5, 0.6, 0.5, 1.2);
+  }
   /** Шаг по воде. */
   splash(vol = 1): void {
     if (!this.ctx) return;

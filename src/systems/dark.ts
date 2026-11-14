@@ -23,6 +23,7 @@ export interface DarkWorld {
   radius: number; wick: number; ember: boolean; active: boolean;
   dread: number;                                      // 0..1 — насколько тьма осмелела
   repel: boolean;                                     // свет сейчас достаточно ярок, чтобы сжечь бросок
+  block: boolean;                                     // лампа прикрыта ладонью: бросок бьётся о руку и не достаёт масла
   safe: SafeLight[];
 }
 
@@ -124,6 +125,7 @@ export class Darkness {
         else if (h.burn < 0.05 && !h.fake) {
           // дотянулась: яркий свет сжигает бросок, тусклый — она отпивает масло
           if (w.repel) { h.burn = 0.06; this.onSound('sizzle', 0, 1); }
+          else if (w.block) { h.burn = 0.06; this.onSound('knock', 0, 1); }
           else { touched = h; h.state = 'gone'; h.timer = S.respawn; h.alpha = 0; h.cool = this.cooldown(w.dread, named); continue; }
         }
         if (h.burn >= 0.05 || h.fake && dist <= 1.0 || h.run > T.dread.lungeReach) h.burn = Math.min(1, Math.max(h.burn, 0.05) + dt * 2.0);

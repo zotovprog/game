@@ -55,6 +55,30 @@ html, body { margin: 0; height: 100%; background: var(--void); overflow: hidden;
   background: rgba(233, 223, 198, 0.16); box-shadow: 0 0 12px rgba(243, 234, 214, 0.35); }
 #wick.locked { opacity: 0.25; pointer-events: none; }
 
+/* руки: склянка и ладонь — справа, под ползунком фитиля */
+#hands { right: max(6px, env(safe-area-inset-right, 0px)); bottom: max(20px, calc(env(safe-area-inset-bottom, 0px) + 14px)); display: flex; flex-direction: column; gap: 12px; align-items: flex-end; }
+#hands button { position: relative; width: 66px; height: 66px; border-radius: 50%; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.5); color: var(--bone-hi);
+  font-family: var(--display); font-weight: 700; pointer-events: auto; touch-action: none; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 0; }
+#hands button span { font-size: 13px; letter-spacing: 0.08em; color: var(--bone-mid); line-height: 1; }
+#hands button kbd { font-family: var(--text); font-size: 10px; color: var(--ash); position: absolute; top: -7px; right: -2px; background: var(--void); padding: 0 4px; border: 1px solid var(--line); border-radius: 3px; }
+/* склянка: кольцо показывает, сколько уже долито */
+#bPour { background: conic-gradient(rgba(233, 223, 198, 0.55) calc(var(--p, 0) * 360deg), rgba(0, 0, 0, 0.5) 0) !important; }
+#bPour::before { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: #070707; }
+#bPour > * { position: relative; }
+#bPour i { width: 9px; height: 15px; border: 1px solid var(--bone-mid); border-radius: 1px 1px 4px 4px; background: linear-gradient(to top, var(--bone-hi) 60%, transparent 60%); }
+#bPour b { font-size: 21px; line-height: 0.9; }
+#bPour.empty { opacity: 0.4; }
+#bPour.alert { border-color: var(--ember); animation: pulse 0.6s ease-in-out infinite; }
+#bPour.alert b, #bPour.alert span { color: var(--ember); }
+/* ладонь над пламенем */
+#bShield i { width: 26px; height: 13px; border: 1px solid var(--bone-mid); border-bottom: none; border-radius: 26px 26px 0 0; position: relative; margin-bottom: 3px; }
+#bShield i::after { content: ''; position: absolute; left: 50%; bottom: -3px; width: 5px; height: 8px; margin-left: -2.5px; border-radius: 50% 50% 40% 40%; background: var(--bone-hi); box-shadow: 0 0 6px var(--bone-hi); }
+#bShield.on { background: rgba(233, 223, 198, 0.2); border-color: var(--bone-hi); }
+#bShield.alert { border-color: var(--ember); animation: pulse 0.45s ease-in-out infinite; }
+body.touch #hands button kbd { display: none; }
+body:not(.touch) #hands button { width: 56px; height: 56px; opacity: 0.75; }
+body.touch #wick { top: 40%; }
+
 #hint { top: max(13%, calc(env(safe-area-inset-top, 0px) + 78px)); left: 50%; transform: translateX(-50%); width: min(78vw, 640px); text-align: center;
   font-size: clamp(17px, 2.3vw, 22px); line-height: 1.45; color: var(--bone-mid); text-shadow: 0 0 12px var(--void), 0 0 3px var(--void); }
 
@@ -70,6 +94,13 @@ html, body { margin: 0; height: 100%; background: var(--void); overflow: hidden;
 #dialog .txt { font-size: clamp(19px, 2.6vw, 25px); line-height: 1.4; text-shadow: 0 0 14px var(--void), 0 0 4px var(--void); min-height: 2.9em; }
 #dialog .txt.in { animation: linein 0.5s ease-out; }
 @keyframes linein { from { opacity: 0; transform: translateY(6px); } }
+/* «Дальше»: явная кнопка; тап в любое место экрана делает то же */
+#dialog .next { width: auto !important; margin: 10px auto 0; padding: 6px 22px !important; font-family: var(--display); font-weight: 700; font-size: 22px !important; letter-spacing: 0.2em;
+  color: var(--bone-mid) !important; border-color: var(--line); background: rgba(0, 0, 0, 0.45) !important; }
+#dialog .next::after { content: ' ▸'; }
+/* вступление и записка — по центру экрана */
+#dialog.centered { bottom: auto; top: 50%; transform: translate(-50%, -50%); }
+#dialog.centered .txt { font-size: clamp(23px, 3.6vw, 36px); line-height: 1.4; min-height: 0; margin-bottom: 14px; }
 #dialog .opts { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; align-items: center; }
 #dialog button, .overlay button { font: inherit; color: var(--bone-hi); background: rgba(0, 0, 0, 0.62); border: 1px solid var(--line);
   padding: 12px 20px; cursor: pointer; pointer-events: auto; width: min(86vw, 460px); transition: border-color 0.2s, background 0.2s; font-size: clamp(17px, 2.2vw, 20px);
@@ -110,3 +141,14 @@ body:not(.touch) #wick { opacity: 0.5; }
 #debug label { display: grid; grid-template-columns: 1fr 86px 38px; gap: 4px; align-items: center; }
 #debug input { width: 86px; }
 #debug button { font: inherit; margin: 2px 2px 6px 0; }
+
+/* значок голоса над говорящим */
+#speak { position: absolute; left: 0; top: 0; display: flex; gap: 3px; align-items: flex-end; height: 16px; pointer-events: none; opacity: 0; transition: opacity 0.25s; filter: drop-shadow(0 0 5px rgba(243, 234, 214, 0.55)); }
+#speak.on { opacity: 0.95; }
+#speak i { width: 2.5px; height: 4px; border-radius: 2px; background: var(--bone-hi); animation: speak 0.42s ease-in-out infinite alternate; }
+#speak i:nth-child(2) { animation-delay: 0.14s; animation-duration: 0.36s; }
+#speak i:nth-child(3) { animation-delay: 0.27s; animation-duration: 0.5s; }
+@keyframes speak { from { height: 3px; } to { height: 15px; } }
+@media (prefers-reduced-motion: reduce) { #speak i { animation: none; height: 9px; } }
+#hands.away, #wick.away { opacity: 0 !important; pointer-events: none !important; }
+#hands.away button { pointer-events: none; }

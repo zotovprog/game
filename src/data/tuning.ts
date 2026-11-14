@@ -5,12 +5,19 @@ export const T = {
     wickMin: 0.15, wickMax: 1, wickDefault: 0.55, wickRate: 0.9,   // доля в секунду при удержании
     radiusMin: 2.4, radiusMax: 7.2,                                 // радиус по фитилю при полной лампе
     oilFloor: 0.3,                                                  // доля радиуса, когда масло на нуле: круг сжимается вместе с маслом
-    burnBase: 0.5, burnWick: 1.8, burnPow: 1.5,                     // масло/с = base + wick^pow * burnWick: полной лампы хватает на ~80 с
-    startOil: 55, flask: 22, ownLamp: 25,
+    burnBase: 0.36, burnWick: 1.35, burnPow: 1.5,                   // масло/с = base + wick^pow * burnWick: полной лампы хватает на ~110 с
+    startOil: 60, flask: 38, ownLamp: 25,
+    startFlasks: 1, maxFlasks: 3,                                   // склянки носишь с собой и доливаешь сам
+    pourTime: 2.0,              // столько секунд стоишь и льёшь
+    relightTime: 2.2, relightCost: 2, outRadius: 0.95,              // лампу задуло: разжечь заново, стоя в темноте
+    shieldRadius: 0.58, shieldSpeed: 0.55,                          // прикрыл ладонью: круг меньше, идёшь медленнее
     lowOil: 25,                 // ниже — лампа чихает, сердце стучит
-    emberRadius: 1.15, emberTime: 7,                                // масло кончилось: столько секунд до конца
-    companionBurn: 0.1, giveCost: 14, boyCost: 10, boyLoad: 0.7, familyShare: 0.34, touchDrain: 12, brazierCost: 6,
+    emberRadius: 1.15, emberTime: 8,                                // масло кончилось: столько секунд до конца
+    companionBurn: 0.1, giveCost: 14, boyCost: 10, boyLoad: 0.7, familyShare: 0.34, touchDrain: 9, outDrain: 16, brazierCost: 6,
   },
+  // сквозняк: предупреждение, потом порыв; не прикрыл лампу — гаснет
+  gust: { warn: 1.4, blow: 1.5, exposed: 0.45, firstWarn: 2.6,
+    every: { void: [13, 22], fissure: [20, 34], water: [28, 44], rubble: [48, 80], mine: [48, 80], columns: [40, 66], gate: [60, 90] } as Record<string, [number, number]> },
   // страх нарастает: от входа к Вратам тьма злее, броски чаще, масло горит быстрее
   dread: {
     start: 0.12, deep: 0.92,     // у места пробуждения и у Врат
@@ -19,7 +26,7 @@ export const T = {
     windup: 1.4,                 // столько секунд слышно, что она сейчас бросится
     lungeSpeed: 9, lungeReach: 9,
     repelWick: 0.72,             // фитиль не ниже этого — бросок сгорает
-    burnBonus: 0.5,              // во сколько раз быстрее горит масло на самой глубине (1 + bonus)
+    burnBonus: 0.3,              // во сколько раз быстрее горит масло на самой глубине (1 + bonus)
   },
   // вал: в конце тьма идёт по твоему следу
   wave: { speed: 2.5, start: 16, reach: 1.7, drain: 13 },

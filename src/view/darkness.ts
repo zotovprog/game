@@ -48,13 +48,21 @@ vec3 rockDetail(vec3 col, vec3 p){
   return col * tone;
 }
 #endif
-vec3 darkApply(vec3 col, vec3 p){
+float dkD = 9.0;        // до ближайшего света, в его радиусах (1 — на краю круга)
+float dkRim = 1.0;      // затемнение у кромки выреза в стене
+float dkDist(vec3 p){
   float d = 9.0;
   for (int i = 0; i < DARK_MAX; i++) {
     if (i >= uLightCount) break;
     vec4 L = uLights[i];
     d = min(d, length(p.xz - L.xz) / max(L.w, 0.001));
   }
+  return d;
+}
+/** Дальше этого края шум уже не дотянется: там всегда чёрное, считать нечего. */
+float dkFar(){ return 1.0 + 0.5 * uEdgeNoise + 0.35 * uLobe; }
+vec3 darkApply(vec3 col, vec3 p){
+  float d = dkD;
   vec2 q = p.xz * 0.42;
   float n = dkFbm(q + vec2(uTime*0.05, -uTime*0.035));
   float n2 = dkFbm(q*2.3 - vec2(uTime*0.09, uTime*0.06) + n*1.7);
@@ -78,7 +86,7 @@ vec3 darkApply(vec3 col, vec3 p){
   #ifndef DARK_TALL
   lit *= 1.0 - smoothstep(uHeight.x, uHeight.y, p.y);
   #endif
-  return col * lit;
+  return col * lit * dkRim;
 }
 `;
 
@@ -88,11 +96,26 @@ const CUT = /* glsl */ `
   vec3 rel = vDarkPos - uCutPos;
   float along = dot(rel, uCutDir);
   float pd = length(rel - along * uCutDir);
-  if (vDarkPos.y > 0.55 && along > 0.45 && pd < uCutR) {
-    float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-    if (ign > smoothstep(0.5, 1.0, pd / uCutR)) discard;
+  float k = smoothstep(0.55, 0.85, vDarkPos.y) * smoothstep(0.45, 0.8, along);
+  if (k > 0.0) {
+    float rr = uCutR * (0.72 + 0.34 * dkNoise(vDarkPos.xz * 1.6 + vDarkPos.y * 1.3)) * k;
+    if (pd < rr) discard;
+    dkRim = mix(1.0, smoothstep(rr, rr + 0.45, pd), k);
   }
 }
+#endif
+`;
+
+/** Всё, что заведомо в темноте, красится в чёрное сразу — без фактуры, света и теней. */
+const EARLY = /* glsl */ `
+dkD = dkDist(vDarkPos);
+#ifdef DARK_TALL
+if (dkD > dkFar()) { gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
+#else
+if (dkD > dkFar() || vDarkPos.y > uHeight.y) { gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
+#endif
+#ifdef DARK_ROCK
+  diffuseColor.rgb = rockDetail(diffuseColor.rgb, vDarkPos);
 #endif
 `;
 
@@ -115,7 +138,7 @@ export function darkify<T extends Material>(mat: T, cut = false, tall = false, r
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${cut ? '#define DARK_CUT\n' : ''}${tall ? '#define DARK_TALL\n' : ''}${rock ? '#define DARK_ROCK\n' : ''}${FRAG_HEAD}`)
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\n${CUT}`)
-      .replace('#include <color_fragment>', `#include <color_fragment>\n#ifdef DARK_ROCK\n  diffuseColor.rgb = rockDetail(diffuseColor.rgb, vDarkPos);\n#endif`)
+      .replace('#include <color_fragment>', `#include <color_fragment>\n${EARLY}`)
       .replace('#include <dithering_fragment>', 'gl_FragColor.rgb = darkApply(gl_FragColor.rgb, vDarkPos);\n#include <dithering_fragment>');
   };
   mat.customProgramCacheKey = () => `dark${cut ? '-cut' : ''}${tall ? '-tall' : ''}${rock ? '-rock' : ''}`;
@@ -129,7 +152,11 @@ export function addDarkLight(x: number, y: number, z: number, r: number): void {
   if (r > 0.01) _lights.push({ x, y, z, r });
 }
 /** Выбрать ближайшие к фокусу источники и записать в униформы. */
-export function commitDarkLights(fx: number, fz: number): void {
+export function commitDarkLights(fx: number, fz: number, view = 26): void {
+  for (let i = _lights.length - 1; i >= 0; i--) {
+    const l = _lights[i];
+    if (Math.hypot(l.x - fx, l.z - fz) > view + l.r * 1.5) _lights.splice(i, 1);
+  }
   _lights.sort((a, b) => (a.x - fx) ** 2 + (a.z - fz) ** 2 - ((b.x - fx) ** 2 + (b.z - fz) ** 2));
   const n = Math.min(DARK_MAX, _lights.length);
   for (let i = 0; i < n; i++) darkU.uLights.value[i].set(_lights[i].x, _lights[i].y, _lights[i].z, _lights[i].r);
