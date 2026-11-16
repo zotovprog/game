@@ -5,6 +5,7 @@
 // node tools/voice.mjs --dry      — только посчитать, что и сколько знаков будет записано
 // node tools/voice.mjs            — записать недостающее (уже записанное не трогает)
 // node tools/voice.mjs --only efim,narrator — только эти роли
+// node tools/voice.mjs --raw <папка>   — пересобрать из сохранённых сырых записей (<ключ>-raw.mp3), без новых трат
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -15,6 +16,7 @@ const args = process.argv.slice(2);
 const dry = args.includes('--dry');
 const only = args.includes('--only') ? args[args.indexOf('--only') + 1].split(',') : null;
 const OUT = 'public/voice', MANIFEST = 'src/data/voice.json';
+const RAW = args.includes('--raw') ? args[args.indexOf('--raw') + 1] : null;      // папка с сырыми записями: пересобрать без обращения к ElevenLabs
 const MODEL = 'eleven_v4';
 
 // состав: роль → голос из библиотеки пользователя (решение #30)
@@ -142,7 +144,7 @@ if (old.packs) {
   const bufs = old.packs.map((p) => (fs.existsSync(`${OUT}/${p}`) ? fs.readFileSync(`${OUT}/${p}`) : null));
   for (const [k, [pi, off, len, dur]] of Object.entries(old.lines)) if (bufs[pi]) { fs.writeFileSync(`${work}/${k}.mp3`, bufs[pi].subarray(off, off + len)); manifest[k] = dur; }
 } else for (const [k, dur] of Object.entries(old)) if (fs.existsSync(`${OUT}/${k}.mp3`)) { fs.copyFileSync(`${OUT}/${k}.mp3`, `${work}/${k}.mp3`); manifest[k] = dur; }   // прежний вид: по файлу на реплику
-const todo = [...lines.entries()].filter(([k, l]) => (!only || only.includes(l.role.replace('-ghost', ''))) && !manifest[k]);
+const todo = [...lines.entries()].filter(([k, l]) => (!only || only.includes(l.role.replace('-ghost', ''))) && (!manifest[k] || (RAW && fs.existsSync(`${RAW}/${k}-raw.mp3`))));
 const by = {};
 for (const [, l] of lines) { const r = l.role; by[r] ??= { n: 0, ch: 0 }; by[r].n++; by[r].ch += l.text.length + l.tag.length + 1; }
 console.log('реплик всего', lines.size, '· по ролям:', Object.entries(by).map(([r, v]) => `${r} ${v.n}/${v.ch}`).join('  '));
@@ -151,9 +153,10 @@ if (dry) process.exit(0);
 
 // ---------- запись
 async function record(k, l) {
-  const raw = path.join(tmp, `${k}-raw.mp3`), out = `${work}/${k}.mp3`;
+  const kept = RAW && fs.existsSync(`${RAW}/${k}-raw.mp3`);
+  const raw = kept ? `${RAW}/${k}-raw.mp3` : path.join(tmp, `${k}-raw.mp3`), out = `${work}/${k}.mp3`;
   const body = JSON.stringify({ text: `${l.tag} ${l.text}`, model_id: MODEL, language_code: 'ru', voice_settings: { stability: 0 } });
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < 4 && !kept; attempt++) {
     const { stdout } = await run('curl', ['-sS', '-m', '120', '-o', raw, '-w', '%{http_code}', '-X', 'POST',
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceOf(l.role)}?output_format=mp3_44100_128`, '-H', 'Content-Type: application/json', '-d', body]).catch((e) => ({ stdout: 'ERR ' + e.message }));
     if (stdout === '200') break;
@@ -162,10 +165,11 @@ async function record(k, l) {
     if (attempt === 3) throw new Error(`${stdout} ${err}`);
     await new Promise((r) => setTimeout(r, 2000 * (attempt + 1) ** 2));
   }
-  // ровная громкость, без тишины по краям, моно
-  await run('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', '-i', raw, '-af',
-    'silenceremove=start_periods=1:start_threshold=-48dB:start_silence=0.05,areverse,silenceremove=start_periods=1:start_threshold=-48dB:start_silence=0.12,areverse,loudnorm=I=-19:TP=-2:LRA=11',
-    '-ac', '1', '-ar', '44100', '-c:a', 'libmp3lame', '-b:a', '64k', out]);
+  // ровная громкость, моно; края фразы не обрезаются — вдох в начале и затихание в конце остаются как сыграны
+  // (фильтр silenceremove на части записей зависает, а тишины по краям у синтеза и так почти нет)
+  await run('ffmpeg', ['-nostdin', '-y', '-hide_banner', '-loglevel', 'error', '-i', raw, '-af',
+    'loudnorm=I=-19:TP=-2:LRA=11',
+    '-ac', '1', '-ar', '44100', '-c:a', 'libmp3lame', '-b:a', '64k', out], { timeout: 60000 });
   const { stdout: d } = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', out]);
   manifest[k] = Math.round(parseFloat(d) * 100) / 100;
 }

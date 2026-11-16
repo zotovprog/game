@@ -26,6 +26,8 @@ export class Human {
   carrying = false;
   /** 0..1 — говорит: кивает, поворачивает голову, жестикулирует свободной рукой */
   talk = 0;
+  /** 0..1 — тьма утягивает вниз: фигура уходит в пол и заваливается */
+  sink = 0;
   /** 0..1 — прикрывает лампу ладонью */
   shield = 0;
   /** 0..1 — доливает масло или разжигает: свободная рука у лампы */
@@ -99,7 +101,8 @@ export class Human {
     this.poseK = damp(this.poseK, this.pose === 'sit' ? 1 : 0, 4, dt);
     this.lieK = damp(this.lieK, this.pose === 'lie' ? 1 : 0, 2.6, dt);
     this.root.rotation.x = -1.46 * this.lieK;
-    this.root.position.y = 0.14 * this.lieK;
+    this.root.position.y = 0.14 * this.lieK - 1.55 * this.sink;
+    this.root.rotation.z = 0.5 * this.sink;
     this.phase += dt * (5.2 + 4.5 * this.walk) * (this.walk > 0.02 ? 1 : 0);
     const w = this.walk, s = Math.sin(this.phase), k = this.poseK;
     const breath = Math.sin(t * 1.7) * 0.012;

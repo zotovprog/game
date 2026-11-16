@@ -61,9 +61,10 @@ export class Story {
     const g = this.g, tr = g.trace;
     if (tr.lastDeath && g.grid.isFloor(tr.lastDeath.x, tr.lastDeath.z)) {
       const [x, z] = g.grid.snap(tr.lastDeath.x, tr.lastDeath.z, 0.5);
-      const own = new Spirit(g.style, 0.71, 0.95, 0.5);
+      const own = new Spirit(g.style, 0.71, 0.78, 0);
       own.group.position.set(x, 0, z);
-      own.alpha = 0.9; own.face = 0.5; own.update(0);
+      own.alpha = 0.95; own.face = 0; own.update(0);
+      g.phantoms.pin(x, z, 2.42 * 0.78 * 0.97);                  // в темноте от неё видны только глаза
       g.stage.scene.add(own.group);
       this.ownShade = own;
       g.addFlask(...g.grid.snap(x + 0.9, z + 0.6, 0.4), true);
@@ -523,10 +524,10 @@ export class Story {
     g.after(3, () => { g.gust = 0; g.sfx.relight(); });
   }
 
-  /** Скример: визг, лицо во весь экран и бросок из темноты. */
+  /** Испуг без картинок: удар звука, бросок тьмы и глаза, разом открывшиеся вокруг. */
   private screamer(x: number, z: number): void {
     const g = this.g;
-    g.sfx.scream(); g.hud.scream();
+    g.sfx.stinger(); g.phantoms.surge();
     g.stage.shake = 1; g.chroma = 1;
     g.dark.lunge(x, z);
   }
@@ -857,12 +858,13 @@ export class Story {
 
   death(): void {
     const g = this.g, tr = g.trace, E = TX.endings.dead;
-    g.sfx.death(); g.sfx.scream(); g.hud.scream();
-    g.stage.shake = 0.8; g.chroma = 1;
-    this.fadeOut(0.9, 2.2);
+    // тьма не пугает картинкой — она забирает: см. Game.engulf
+    g.sfx.death(); g.sfx.engulf();
+    g.stage.shake = 0.5; g.chroma = 0.8;
+    this.fadeOut(T.death.fadeFrom, T.death.fade);
     tr.runs++; tr.lastDeath = { x: g.pos.x, z: g.pos.z };
     saveTrace(tr);
-    g.after(4, () => {
+    g.after(T.death.screen, () => {
       g.hud.showHud(false);
       g.hud.screen({ title: E.title, sub: '', lines: E.lines, button: saved ? TX.backToFire : TX.again, black: true, onButton: () => restart() });
     });

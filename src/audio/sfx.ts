@@ -48,7 +48,7 @@ export class Sfx {
   private voxFail = 0;
   private voxOff = location.protocol === 'file:' || !VOX.packs?.length;             // записи лежат рядом со страницей; без них — бормотание
   private packs = new Map<number, Promise<ArrayBuffer>>();
-  private dialogStop: (() => void) | null = null; private dialogToken = 0;
+  private dialogStop: (() => void) | null = null; private dialogToken = 0; private dialogWait = false;
   private narrQ: string[] = []; private narrBusy = false; private narrStop: (() => void) | null = null;
   private until = { dialog: 0, bark: 0, whisper: -99, ghost: -99 };    // до какого момента (время звука) занят канал / когда шептали в последний раз
   /** сколько записанных реплик уже прозвучало и сколько звучит сейчас (для проверок) */
@@ -124,6 +124,12 @@ export class Sfx {
     this.whineG = this.gain(0, this.master);
     for (const f of [3050, 3127]) { const o = c.createOscillator(); o.type = 'sine'; o.frequency.value = f; o.connect(this.whineG); o.start(); }
     this.master.gain.setTargetAtTime(0.85, c.currentTime, 1.5);
+    void this.warm();
+  }
+  /** Все пакеты голосов качаются заранее, по одному: к первой реплике роли запись уже на месте. */
+  private async warm(): Promise<void> {
+    if (this.voxOff) return;
+    for (let i = 0; i < VOX.packs.length && !this.voxOff; i++) await this.pack(i).catch(() => { if (++this.voxFail >= 3) this.voxOff = true; });
   }
 
   private gain(v: number, to: AudioNode | null): GainNode { const g = this.ctx!.createGain(); g.gain.value = v; if (to) g.connect(to); return g; }
@@ -250,7 +256,7 @@ export class Sfx {
     this.tWh -= dt;
     if (this.tWh <= 0) {
       this.tWh = 0.07 + Math.random() * 0.16;
-      const lvl = s.quiet ? 0 : Math.pow(Math.max(s.near, s.pressure * 0.7), 1.6) * 0.085;
+      const lvl = s.quiet ? 0 : Math.pow(Math.max(s.near, s.pressure * 0.7), 1.6) * T.whisperBed;
       this.whG.gain.setTargetAtTime(Math.random() < 0.3 ? 0 : lvl * (0.3 + Math.random()), t, 0.03);
     }
     // треск огня — случайные всплески
@@ -382,27 +388,35 @@ export class Sfx {
     if (channel === 'whisper' || channel === 'ghost') {
       if (this.talking || this.narrBusy || now - this.until[channel] < T.voiceGap[channel] || now - this.until.whisper < 3 || now - this.until.ghost < 3) return 0;
       this.until[channel] = now;
-      void this.loadVox(k).then((buf) => { if (buf && this.ctx && !this.talking) this.playVox(buf, kind, pan); });
+      void this.loadVox(k).then((buf) => { if (buf && this.ctx && !this.talking && this.now - now < 1.2) this.playVox(buf, kind, pan); });
       return len;
     }
     // говорит человек: рассказчик умолкает
     this.narrQ.length = 0; this.narrStop?.();
     if (channel === 'bark') {
-      if (now < this.until.dialog) return 0;
+      if (now < this.until.dialog || now < this.until.bark) return 0;      // одна реплика за раз
       this.until.bark = now + len;
-      void this.loadVox(k).then((buf) => { if (buf && this.ctx) this.playVox(buf, kind, pan); });
+      void this.loadVox(k).then((buf) => {
+        if (!buf || !this.ctx || this.now - now > 1.2) { this.until.bark = 0; return; }       // опоздала — лучше промолчать
+        this.playVox(buf, kind, pan);
+      });
       return len;
     }
     const token = this.dialogToken;
-    this.until.dialog = now + len + 0.3;
+    this.until.dialog = now + len + 0.3; this.dialogWait = true;
     void this.loadVox(k).then((buf) => {
-      if (!buf || !this.ctx || token !== this.dialogToken) return;
-      this.dialogStop = this.playVox(buf, kind, pan, () => { if (token === this.dialogToken) this.until.dialog = 0; });
+      if (token !== this.dialogToken) return;
+      this.dialogWait = false;
+      if (!buf || !this.ctx) { this.until.dialog = 0; return; }
+      this.until.dialog = this.now + len + 0.3;                         // отсчёт — от настоящего начала звука, а не от запроса
+      this.dialogStop = this.playVox(buf, kind, pan, () => { if (token === this.dialogToken) { this.until.dialog = 0; this.dialogStop = null; } });
     });
     return len;
   }
   /** Реплику пролистали или разговор кончился: голос обрывается сразу. */
-  dialogCut(): void { this.dialogToken++; this.dialogStop?.(); this.dialogStop = null; this.until.dialog = 0; }
+  dialogCut(): void { this.dialogToken++; this.dialogStop?.(); this.dialogStop = null; this.dialogWait = false; this.until.dialog = 0; }
+  /** Реплика диалога ещё грузится или звучит: текст на экране должен её дождаться. */
+  get dialogBusy(): boolean { return this.dialogWait || this.dialogStop !== null; }
   private pumpNarr(clear: boolean): void {
     if (this.narrBusy) return;
     const k = this.narrQ.shift();
@@ -498,12 +512,18 @@ export class Sfx {
     this.burst(this.white, 'bandpass', 900 + Math.random() * 500, 320, 0.2, 0.09 * vol, 0, 0.6, 1.1);
     this.burst(this.brown, 'lowpass', 420, 160, 0.14, 0.2 * vol, 0, 0.3);
   }
-  /** Скример: визг из расстроенных пил поверх провала баса. */
-  scream(): void {
+  /** Выдох на огонь: в живой полосе — ровный, мимо — пламя фыркает. */
+  blow(steady: boolean): void {
     if (!this.ctx) return;
-    this.tone('sine', 90, 22, 1.4, 1.0, 0, 0.3);
-    for (let i = 0; i < 7; i++) { const f = 620 + i * 133 + Math.random() * 60; this.tone('sawtooth', f, f * (1.25 + Math.random() * 0.3), 0.75, 0.05, i % 2 ? 0.7 : -0.7, 0.8, 0.008); }
-    this.burst(this.white, 'bandpass', 2200, 5200, 0.6, 0.3, 0, 0.8, 0.9);
+    this.burst(this.white, 'bandpass', steady ? 900 : 1500, steady ? 1500 : 500, 0.3, steady ? 0.05 : 0.035, 0, 0.15, 0.8);
+    if (!steady) this.burst(this.white, 'highpass', 3200, 2400, 0.04, 0.03, 0, 0);
+  }
+  /** Тьма смыкается над героем: нарастающий рёв снизу, шипение дыма и долгий выдох. */
+  engulf(): void {
+    if (!this.ctx) return;
+    this.burst(this.brown, 'lowpass', 90, 520, 2.6, 1.0, 0, 0.5, 0.8);
+    this.burst(this.white, 'bandpass', 500, 2600, 2.2, 0.16, -0.4, 0.9, 1.2);
+    setTimeout(() => { if (this.ctx) { this.burst(this.white, 'bandpass', 2400, 300, 1.9, 0.14, 0.4, 1, 1); this.tone('sine', 62, 24, 2.4, 0.8, 0, 0.3); } }, 1300);
   }
   /** Далёкий человеческий крик: тянется, срывается и обрывается. Почти одно эхо — он далеко. */
   farScream(kind: Voice, pan: number): void {

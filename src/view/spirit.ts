@@ -1,4 +1,4 @@
-// Дух: высокая фигура из дыма. В темноте виден только холодный контур и бледное лицо.
+// Дух: фигура из чёрного дыма. На свету — тёмный силуэт, в темноте её не видно вовсе (только глаза, см. systems/phantoms).
 import {
   Color, Group, LatheGeometry, Mesh, MeshBasicMaterial, ShaderMaterial, SphereGeometry, Sprite, SpriteMaterial, Vector2, NormalBlending, DoubleSide,
 } from 'three';
@@ -29,7 +29,7 @@ void main(){
   float rim = pow(1.0 - abs(normalize(vN).z), 2.2);
   float smoke = n2(vec2(vP.x*3.0 + uSeed*10.0, vP.y*2.2 - uTime*0.5)) * 0.6 + n2(vec2(vP.z*7.0, vP.y*5.0 - uTime*0.9)) * 0.4;
   float foot = smoothstep(0.0, 1.5, vY);                          // у пола тает
-  float body = 0.7 * foot * (0.65 + 0.35*smoke);
+  float body = 0.96 * foot * (0.78 + 0.22*smoke);                 // плотная: тень должна быть темнее пола, на котором стоит
   float burn = smoothstep(1.0 - uBurn*1.3, 1.3 - uBurn*1.3, smoke + (1.0 - foot)*0.3); // свет выжигает дыры
   float alpha = clamp(body + rim*0.5, 0.0, 1.0) * uAlpha * (1.0 - burn);
   vec3 col = uRim * (rim * uRimI * (0.6 + 0.8*smoke));

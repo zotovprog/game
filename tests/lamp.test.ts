@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { T } from '../src/data/tuning';
-import { addOil, burnRate, isDead, lightRadius, newLamp, pourStep, stepLamp } from '../src/systems/lamp';
+import { addOil, burnRate, fanStep, fanZone, isDead, knockFlame, lightRadius, needsFan, newLamp, pourStep, stepLamp } from '../src/systems/lamp';
 
 describe('лампа', () => {
   it('яркий фитиль жжёт масло быстрее, спутники — ещё быстрее', () => {
@@ -35,11 +35,38 @@ describe('лампа', () => {
     expect(pourStep(s, T.lamp.pourTime * 0.6, true)).toBe('poured');
     expect(s.flasks).toBe(1); expect(s.oil).toBe(20 + T.lamp.flask);
   });
-  it('задуло: света нет и масло не горит, пока не разожжёшь', () => {
-    const s = newLamp(); s.held = true; s.oil = 50; s.lit = false; s.flasks = 0;
-    expect(lightRadius(s)).toBe(T.lamp.outRadius);
+  /** Игрок, который умеет: дует, пока огонёк ниже середины живой полосы. */
+  const play = (s: ReturnType<typeof newLamp>, dread: number, secs: number): string => {
+    for (let t = 0; t < secs; t += 1 / 60) {
+      const r = fanStep(s, 1 / 60, s.draft < fanZone(s.fanT, dread).c, dread);
+      if (r !== 'none') return r;
+    }
+    return 'none';
+  };
+  it('порыв сбивает пламя: круг сжат, масло горит, долить нельзя — сначала раздуй', () => {
+    const s = newLamp(); s.held = true; s.oil = 60; s.flasks = 1;
+    const full = lightRadius(s);
+    knockFlame(s);
+    expect(needsFan(s)).toBe(true);
+    expect(lightRadius(s)).toBeLessThan(full * 0.8);
+    expect(pourStep(s, T.lamp.pourTime * 2, true)).toBe('none'); expect(s.flasks).toBe(1);
+  });
+  it('раздувание — баланс: умелый спасает пламя, бездействие и «дуть без остановки» его гасят', () => {
+    for (const dread of [0, 0.5, 1]) {
+      const a = newLamp(); a.held = true; a.oil = 60; knockFlame(a);
+      expect(play(a, dread, 12)).toBe('saved'); expect(a.lit).toBe(true); expect(a.falter).toBe(0);
+    }
+    const idle = newLamp(); idle.held = true; idle.oil = 60; knockFlame(idle);
+    let r = 'none'; for (let t = 0; t < 20 && r === 'none'; t += 1 / 60) r = fanStep(idle, 1 / 60, false, 0);
+    expect(r).toBe('out'); expect(idle.lit).toBe(false); expect(lightRadius(idle)).toBeLessThan(1.6);
+    const mash = newLamp(); mash.held = true; mash.oil = 60; knockFlame(mash);
+    r = 'none'; for (let t = 0; t < 30 && r === 'none'; t += 1 / 60) r = fanStep(mash, 1 / 60, true, 0);
+    expect(r).toBe('out');
+  });
+  it('погасшую лампу можно раздуть заново; масло при этом не горит', () => {
+    const s = newLamp(); s.held = true; s.oil = 50; s.lit = false;
     stepLamp(s, 5, 0); expect(s.oil).toBe(50);
-    expect(pourStep(s, T.lamp.relightTime + 0.01, true)).toBe('relit');
-    expect(s.lit).toBe(true);
+    expect(play(s, 0.5, 15)).toBe('relit');
+    expect(s.lit).toBe(true); expect(s.oil).toBe(50 - T.lamp.relightCost);
   });
 });

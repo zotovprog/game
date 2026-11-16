@@ -58,8 +58,8 @@ export class Forsaken {
         const gd = g.dist(gh.x, gh.z);
         const lit = g.lamp.lit && g.lamp.oil > 0 && gd < g.radius * 0.72;
         gh.burn = lit ? gh.burn + dt * F.burn : Math.max(0, gh.burn - dt * 0.3);
-        gh.v.alpha = damp(gh.v.alpha, near ? 0.62 : 0, 1.6, dt);
-        gh.v.burn = Math.min(1, gh.burn); gh.v.agitation = Math.min(1, gh.burn * 1.5); gh.v.face = 0.07;
+        gh.v.alpha = damp(gh.v.alpha, near ? 0.95 : 0, 1.6, dt);
+        gh.v.burn = Math.min(1, gh.burn); gh.v.agitation = Math.min(1, gh.burn * 1.5); gh.v.face = 0;
         gh.v.group.rotation.y = Math.atan2(g.pos.x - gh.x, g.pos.z - gh.z);
         gh.v.update(t);
         if (gh.burn >= 1) {
@@ -143,7 +143,7 @@ export class Forsaken {
       bones.position.set(x, 0, z); bones.rotation.y = i * 2.1 + c.z;
       g.stage.scene.add(bones);
       c.bones.push(bones);
-      const v = new Spirit(st, (i * 0.37 + c.x * 0.013) % 1, tall, 0.05);
+      const v = new Spirit(st, (i * 0.37 + c.x * 0.013) % 1, tall, 0);
       v.group.position.set(x, 0, z);
       v.alpha = 0; v.update(0);
       g.stage.scene.add(v.group);

@@ -2,7 +2,6 @@
 // действие и выбор — кнопки, фитиль — ползунок у правого края, реплики идут сами.
 import { Input } from '../core/input';
 import { TX } from '../data/texts';
-import { faceCanvas } from '../view/faces';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, id = '', cls = ''): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag);
@@ -26,6 +25,7 @@ export class Hud {
   private wick = el('div', 'wick', 'fade hidden');
   private wickKnob = el('i');
   private hands = el('div', 'hands', 'fade hidden');
+  private draft = el('div', 'draft', 'hidden');
   private speak = el('div', 'speak');
   private bPour = el('button', 'bPour');
   private bShield = el('button', 'bShield');
@@ -71,7 +71,8 @@ export class Hud {
     pauseBtn.addEventListener('click', () => this.onPause?.());
     this.goal.append(this.goalText, this.goalArrow);
     this.speak.innerHTML = '<i></i><i></i><i></i>';
-    root.append(this.area, this.mark, this.speak, this.oil, this.goal, this.hintEl, this.wick, this.hands, this.dialog, this.act, pauseBtn);
+    this.draft.innerHTML = `<div class="zone"></div><div class="cur"></div><div class="life"><i></i></div><span>${TX.fanLabel}</span>`;
+    root.append(this.area, this.mark, this.speak, this.oil, this.goal, this.hintEl, this.wick, this.hands, this.draft, this.dialog, this.act, pauseBtn);
     // во время разговора тап в любое место экрана — следующая реплика
     this.area.addEventListener('pointerdown', () => { if (this.onDone) this.input.press('Space'); });
     this.act.addEventListener('click', () => this.input.press('Space'));
@@ -97,19 +98,39 @@ export class Hud {
   /** Озвучка: игра возвращает длительность записи в секундах (0 — голоса нет). kind: line — реплика, pre — скоро понадобится, hint, whisper, screen. */
   onVoice: (kind: 'line' | 'pre' | 'hint' | 'whisper' | 'screen' | 'end', who: string, text: string) => number = () => 0;
   private lastLine = '';
+  /** Голос реплики ещё грузится или звучит — текст его ждёт. */
+  voiceHold: () => boolean = () => false;
   get speakerName(): string { return this.busy ? this.who.textContent ?? '' : ''; }
   /** Открыт ли диалог или выбор. */
   get busy(): boolean { return this.onDone !== null || this.onChoice !== null; }
 
   showHud(on: boolean): void { this.oil.classList.toggle('hidden', !on); this.wick.classList.toggle('hidden', !on); this.hands.classList.toggle('hidden', !on); if (!on) this.goal.classList.add('hidden'); }
   /** Кнопки рук: сколько склянок, ход долива, горит ли лампа, прикрыта ли, идёт ли сквозняк. */
-  setHands(flasks: number, pour: number, lit: boolean, shielding: boolean, windy: boolean): void {
+  /**
+   * Раздувание: шкала тяги с живой полосой и огоньком. draft — где огонёк, c/w — центр и полуширина полосы (0..1),
+   * life — сколько осталось сбитому пламени (0 — лампа уже погасла, спешить некуда, кроме тьмы).
+   */
+  setFan(on: boolean, draft: number, c: number, w: number, life: number): void {
+    const d = this.draft;
+    d.classList.toggle('hidden', !on || this.busy);
+    if (!on) return;
+    const z = d.children[0] as HTMLElement, cur = d.children[1] as HTMLElement, lf = (d.children[2] as HTMLElement).firstChild as HTMLElement;
+    z.style.left = `${((c - w) * 100).toFixed(1)}%`; z.style.width = `${(w * 200).toFixed(1)}%`;
+    cur.style.left = `${(draft * 100).toFixed(1)}%`;
+    const inside = Math.abs(draft - c) <= w;
+    d.classList.toggle('in', inside);
+    d.classList.toggle('dying', life > 0 && life < 0.4);
+    (d.children[2] as HTMLElement).style.visibility = life > 0 ? 'visible' : 'hidden';
+    lf.style.width = `${(life * 100).toFixed(1)}%`;
+  }
+  /** fan — пламя надо раздувать: кнопка лампы становится «раздуть», кольцо показывает, насколько раздул. */
+  setHands(flasks: number, progress: number, fan: boolean, shielding: boolean, windy: boolean): void {
     const p = this.bPour;
-    (p.children[1] as HTMLElement).textContent = lit ? String(flasks) : '!';
-    (p.lastChild as HTMLElement).textContent = lit ? TX.btnPour : TX.btnRelight;
-    p.style.setProperty('--p', pour.toFixed(3));
-    p.classList.toggle('empty', lit && flasks === 0);
-    p.classList.toggle('alert', !lit);
+    (p.children[1] as HTMLElement).textContent = fan ? '!' : String(flasks);
+    (p.lastChild as HTMLElement).textContent = fan ? TX.btnFan : TX.btnPour;
+    p.style.setProperty('--p', progress.toFixed(3));
+    p.classList.toggle('empty', !fan && flasks === 0);
+    p.classList.toggle('alert', fan);
     (this.bShield.lastChild as HTMLElement).textContent = TX.btnShield;
     this.bShield.classList.toggle('on', shielding);
     this.bShield.classList.toggle('alert', windy && !shielding);
@@ -241,15 +262,6 @@ export class Hud {
     setTimeout(() => w.remove(), 5200);
   }
 
-  /** Скример: лицо во весь экран на долю секунды. */
-  scream(variant = Math.floor(Math.random() * 7)): void {
-    const s = el('div', '', 'scream');
-    s.style.backgroundImage = `url(${faceCanvas(variant).toDataURL()})`;
-    this.root.append(s);
-    setTimeout(() => s.remove(), 900);
-  }
-
-  /** Полноэкранный слой: меню, пауза, финал. */
   screen(opts: { title?: string; sub?: string; lines?: string[]; mem?: string; small?: string; button?: string; black?: boolean; onButton?: () => void } | null): void {
     this.overlay?.remove(); this.overlay = null;
     if (!opts) return;
@@ -283,7 +295,7 @@ export class Hud {
     } else if (this.onDone) {
       this.lineT -= dt;
       const skip = inp.hit('Space', 'Enter', 'KeyF') && performance.now() - this.shownAt > 300;
-      if (this.lineT <= 0 || skip) this.next();
+      if ((this.lineT <= 0 && (!this.voiceHold() || this.lineT < -14)) || skip) this.next();
     }
   }
 

@@ -208,9 +208,9 @@ export class Darkness {
     for (; tn < TEND_MAX; tn++) tend[tn].set(0, 0, 0, 0);
 
     // голоса тьмы: всегда из черноты, откуда-то сбоку
-    this.soundT -= dt * (0.6 + near + (w.ember ? 1.5 : 0) + smooth(4.5, 2.2, w.radius));
+    this.soundT -= dt * (0.5 + 0.5 * near + (w.ember ? 1 : 0) + 0.5 * smooth(4.5, 2.2, w.radius));
     if (this.soundT <= 0 && w.active) {
-      this.soundT = 2.2 + this.rng() * 5;
+      this.soundT = T.darkSound[0] + this.rng() * (T.darkSound[1] - T.darkSound[0]);          // редко: тишина пугает сильнее
       const a = this.rng() * 6.283, d = w.radius + 1.5 + this.rng() * 8;
       const side = Math.cos(a) * w.rx + Math.sin(a) * w.rz;
       const roll = this.rng();

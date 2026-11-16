@@ -17,6 +17,7 @@ export const darkU = {
   uCutPos: { value: new Vector3() },
   uCutDir: { value: new Vector3(0, 1, 0) },
   uCutR: { value: 1.5 },
+  uSwallow: { value: new Vector4(0, 0, 0, 0) },              // поглощение: x, z, радиус лужи тьмы, высота, до которой она поднялась
 };
 
 const NOISE = /* glsl */ `
@@ -32,7 +33,7 @@ const FRAG_HEAD = /* glsl */ `
 uniform float uLobe; uniform vec2 uLamp; uniform vec4 uTendrils[TEND_MAX];
 uniform float uTime; uniform vec4 uLights[DARK_MAX]; uniform int uLightCount;
 uniform float uEdgeNoise; uniform vec2 uHeight;
-uniform vec3 uCutPos; uniform vec3 uCutDir; uniform float uCutR;
+uniform vec3 uCutPos; uniform vec3 uCutDir; uniform float uCutR; uniform vec4 uSwallow;
 varying vec3 vDarkPos;
 ${NOISE}
 #ifdef DARK_ROCK
@@ -82,6 +83,13 @@ vec3 darkApply(vec3 col, vec3 p){
     float perp = along < 0.0 ? length(rel) : abs(dot(rel, vec2(-dir.y, dir.x)));
     float wdt = T.z * (0.3 + 0.7 * smoothstep(0.0, 3.0, along)) * (0.75 + 0.6 * n2);
     lit *= 1.0 - (1.0 - smoothstep(wdt * 0.45, wdt, perp + (n - 0.5) * 0.35)) * T.w;
+  }
+  // тьма забирает: чёрная лужа под ногами и чернота, поднимающаяся по телу
+  if (uSwallow.z > 0.0) {
+    float sd = length(p.xz - uSwallow.xy) + (n - 0.5) * 0.35;
+    float pool = 1.0 - smoothstep(uSwallow.z * 0.6, uSwallow.z, sd);
+    float climb = 1.0 - smoothstep(uSwallow.w - 0.3, uSwallow.w + 0.05, p.y + (n2 - 0.5) * 0.3);
+    lit *= 1.0 - pool * climb;
   }
   #ifndef DARK_TALL
   lit *= 1.0 - smoothstep(uHeight.x, uHeight.y, p.y);

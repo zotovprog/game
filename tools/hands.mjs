@@ -42,22 +42,36 @@ await until(`${G}.lamp.pour > 0.35`, 120); await shot('pouring');
 ok('pour: flask spent, oil up', await until(`${G}.lamp.flasks === 0 && ${G}.lamp.oil > 44`, 180), 'oil ' + (await D(`${G}.lamp.oil`)).toFixed(0));
 await page.keyboard.up('KeyR');
 
-// 3) порыв без ладони гасит лампу; держать R — разжечь
-await D(`(() => { const g = ${G}; g.wind.phase = 'idle'; g.wind.t = 0; })()`);
+// 3) порыв без ладони сбивает пламя; раздувание — удержать «тягу» в полосе
+const robot = (on) => D(`(() => { clearInterval(window.__fan); const g = ${G}; if (!${on}) { g.input.hold('KeyR', false); return; }
+  window.__fan = setInterval(() => { const l = g.lamp, need = l.oil > 0 && (l.falter > 0 || !l.lit); g.input.hold('KeyR', need && l.draft + l.draftV * 0.25 < g.fanC); }, 25); })()`);
+const gustNow = () => D(`(() => { const g = ${G}; g.wind.phase = 'idle'; g.wind.t = 0; })()`);
+await gustNow();
 ok('gust warns', await until(`${G}.wind.phase !== 'idle'`, 60));
-ok('unshielded lamp blown out', await until(`${G}.lamp.lit === false`, 240), 'radius ' + (await D(`${G}.radius`)).toFixed(2));
-await wait(1.5); await shot('blown-out');
-await page.keyboard.down('KeyR');
-ok('relit by holding', await until(`${G}.lamp.lit === true`, 240));
-await page.keyboard.up('KeyR');
+ok('unshielded flame is knocked, not out yet', await until(`${G}.lamp.falter > 0 && ${G}.lamp.lit`, 240), 'radius ' + (await D(`${G}.radius`)).toFixed(2));
+await wait(1.5); await shot('falter');
+await robot(true);
+ok('fanning in the band saves the flame', await until(`${G}.lamp.falter === 0 && ${G}.lamp.lit`, 240));
+await robot(false);
+await D(`${G}.wind.t = 999`); await until(`${G}.wind.phase === 'idle'`, 120);
+// не раздувать — погаснет; погасшую можно раздуть заново
+await D(`(() => { const g = ${G}; g.lamp.oil = 70; })()`);
+await gustNow();
+await until(`${G}.lamp.falter > 0`, 240);
+ok('ignored flame goes out', await until(`${G}.lamp.lit === false`, 400), 'radius ' + (await D(`${G}.radius`)).toFixed(2));
+await D(`${G}.wind.t = 999`); await wait(1.2); await shot('blown-out');
+await D(`${G}.lamp.oil = 80`);
+await robot(true);
+ok('dead lamp can be fanned back', await until(`${G}.lamp.lit === true`, 400));
+await robot(false);
 
 // 4) ладонь спасает от порыва
 await until(`${G}.wind.phase === 'idle'`, 120);
 await page.keyboard.down('ShiftLeft');
-await D(`(() => { const g = ${G}; g.wind.t = 0; })()`);
+await D(`(() => { const g = ${G}; g.lamp.oil = 80; g.wind.t = 0; })()`);
 await until(`${G}.wind.phase === 'blow'`, 120); await shot('shielded-gust');
 await until(`${G}.wind.phase === 'idle'`, 120);
-ok('shielded lamp survives', await D(`${G}.lamp.lit === true`));
+ok('shielded flame is untouched', await D(`${G}.lamp.lit === true && ${G}.lamp.falter === 0`));
 await page.keyboard.up('ShiftLeft');
 
 // 5) кто говорит — тот и двигается; выбранный ответ произносит герой

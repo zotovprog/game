@@ -10,7 +10,8 @@ export interface Style {
   grain: number; bloom: number; vignette: number;
   spiritRim: number; spiritFace: number; spiritRimI: number;
   eyes: number;          // глаза в темноте: холодные, тусклые
-  walker: number;        // идущий во тьме: едва светлее черноты
+  walker: number;        // идущий за краем света: чёрный силуэт
+  mist: number;          // мгла позади него: на ней чёрное читается в темноте
   cloakPlayer: number; cloakOld: number; cloakWoman: number; cloakDead: number; skin: number;
 }
 
@@ -20,6 +21,6 @@ export const STYLE: Style = {
   edgeNoise: 0.6,
   sat: 0.78, contrast: 1.14, tint: [1.0, 0.995, 0.985],
   grain: 0.07, bloom: 0.55, vignette: 0.55,
-  spiritRim: 0xb8bcc4, spiritFace: 0xe6e8ec, spiritRimI: 0.02, eyes: 0xc9d2e2, walker: 0x282b32,
+  spiritRim: 0xb8bcc4, spiritFace: 0xe6e8ec, spiritRimI: 0, eyes: 0xc9d2e2, walker: 0x000000, mist: 0x363c46,
   cloakPlayer: 0x3b3129, cloakOld: 0x34363a, cloakWoman: 0x452c30, cloakDead: 0x1c1e21, skin: 0x9c8778,
 };
