@@ -347,7 +347,7 @@ export class Game {
   setStood(): void { this.stood = true; }
   /** Мир глазами тьмы — нужен и сюжету (для появления «вернувшихся»). */
   world(active = true): DarkWorld {
-    return { px: this.pos.x, pz: this.pos.z, fx: this.face.x, fz: this.face.z, rx: this.stage.right.x, rz: this.stage.right.z, radius: this.radius, wick: this.lamp.wick, ember: false, active, dread: this.dread, repel: this.lamp.wick >= T.dread.repelWick && this.lamp.oil > 0 && this.lamp.lit && this.lamp.shield < 0.5, block: this.lamp.shield > 0.6, safe: [] };
+    return { px: this.pos.x, pz: this.pos.z, fx: this.face.x, fz: this.face.z, rx: this.stage.right.x, rz: this.stage.right.z, radius: this.radius, ember: false, active, dread: this.dread, repel: false, block: this.lamp.shield > 0.6, safe: [] };
   }
 
   pause(on: boolean): void {
@@ -459,9 +459,14 @@ export class Game {
     // тень
     const sh = this.shade;
     if (sh.state === 'follow') {
-      const [tx, tz] = this.trail(Math.max(2.4, this.radius * 0.9));
+      // идёт по следу у самого края света; если свет подошёл к ней сам — пятится (медленнее, чем ты идёшь: загнать её можно)
+      const keep = Math.max(2.4, this.radius * 0.9), dHero = this.dist(sh.x, sh.z);
+      const [tx, tz] = this.trail(keep);
       const dx = tx - sh.x, dz = tz - sh.z, d = Math.hypot(dx, dz);
-      if (d > 0.3) { const st = Math.min(d, 4.2 * dt); sh.x += (dx / d) * st; sh.z += (dz / d) * st; }
+      if (dHero < keep * 0.85) {
+        const l = dHero || 1;
+        sh.x += ((sh.x - this.pos.x) / l) * T.shade.flee * dt; sh.z += ((sh.z - this.pos.z) / l) * T.shade.flee * dt;
+      } else if (d > 0.3 && Math.hypot(tx - this.pos.x, tz - this.pos.z) > keep * 0.8) { const st = Math.min(d, 4.2 * dt); sh.x += (dx / d) * st; sh.z += (dz / d) * st; }
     }
     if (sh.state !== 'gone') {
       const d = this.dist(sh.x, sh.z);
@@ -528,7 +533,7 @@ export class Game {
   }
   /** где сейчас центр живой полосы тяги (для автопрогонов) */
   fanC = 0.5;
-  private blowT = 0;
+  private blowT = 0; private wasR = false;
   private counts = new Map<string, number>();
   /** Сколько раз это уже случалось (для подсказок, которые со временем короче). */
   private count(key: string): number { const n = (this.counts.get(key) ?? 0) + 1; this.counts.set(key, n); return n; }
@@ -667,19 +672,16 @@ export class Game {
     this.moveNpcs(dt, t);
     this.hero.update(dt, t, this.speed01);
 
-    // фитиль и масло
-    if (lamp.held && this.mode === 'play' && !talking && !this.carrying) {
-      if (this.input.wickSet !== null) lamp.wick = lerp(T.lamp.wickMin, T.lamp.wickMax, this.input.wickSet);
-      lamp.wick = clamp(lamp.wick + this.input.wickHold * T.lamp.wickRate * dt + this.input.wickDelta, T.lamp.wickMin, T.lamp.wickMax);
-    }
-    this.input.wickDelta = 0; this.input.wickSet = null;
     // руки: прикрыть лампу ладонью (держать), долить (держать, стоя на месте), раздуть сбитое пламя (держать тягу в полосе)
     const hands = live && lamp.held;
     lamp.shield = damp(lamp.shield, hands && this.input.down('ShiftLeft', 'ShiftRight', 'KeyC') ? 1 : 0, 9, dt);
     const still = hands && this.speed01 < 0.05, holdR = this.input.down('KeyR');
     const fanning = needsFan(lamp);
     const wasPour = lamp.pour;
-    const did = pourStep(lamp, dt, still && holdR && lamp.shield < 0.3);
+    // с ребёнком на руках не долить: сначала опусти её
+    if (this.carrying && holdR && !this.wasR && !fanning && lamp.flasks > 0) hud.hint(TX.mila.handsBusy, 4);
+    this.wasR = holdR;
+    const did = pourStep(lamp, dt, still && holdR && lamp.shield < 0.3 && !this.carrying);
     if (lamp.pour > 0 && wasPour === 0) this.sfx.pour();
     if (did === 'poured') { this.sfx.pickup(); this.sfx.relight(); this.chroma = 0.3; }
     if (hands || !fanning) {
@@ -865,8 +867,7 @@ export class Game {
     this.family.father.talk = sp === this.family.father ? 1 : 0; this.family.mother.talk = sp === this.family.mother ? 1 : 0;
     this.mila.h.talk = sp === this.mila.h ? 1 : 0;
     if (sp) { sp.head.getWorldPosition(_v); _v.y += 0.42; _v.project(S.camera); hud.setSpeak((_v.x * 0.5 + 0.5) * innerWidth, (1 - (_v.y * 0.5 + 0.5)) * innerHeight); } else hud.setSpeak(null);
-    hud.setWick((lamp.wick - T.lamp.wickMin) / (T.lamp.wickMax - T.lamp.wickMin), this.carrying);
-    window.__metrics = { mode: this.mode, oil: Math.round(lamp.oil), wick: +lamp.wick.toFixed(2), x: +this.pos.x.toFixed(1), z: +this.pos.z.toFixed(1), companions: this.companions.length, flags: [...this.flags] };
+    window.__metrics = { mode: this.mode, oil: Math.round(lamp.oil), x: +this.pos.x.toFixed(1), z: +this.pos.z.toFixed(1), companions: this.companions.length, flags: [...this.flags] };
     this.input.endFrame();
     _focus.set(this.pos.x, 0, this.pos.z);
     if (talking && hud.speakerName && this.lookAt) { _focus.x += clamp((this.lookAt.x - this.pos.x) * 0.5, -1.6, 1.6); _focus.z += clamp((this.lookAt.z - this.pos.z) * 0.5, -1.6, 1.6); }

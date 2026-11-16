@@ -44,9 +44,9 @@ ok('efim refused', await D(`${G}.npcs.efim.state === 'left'`));
 await D(`(() => { ${prep} window.__GAME__.tp(118, 142); })()`);
 ok('darkness takes Efim (scream)', await until(`${G}.flags.has('efimTaken')`, 400), 'lost ' + (await D(`${G}.story.tally().lost`)));
 await wait(2.5); await shot('scream-hint');
-await D(`(() => { ${prep} const c = g.forsaken.cases[0]; window.__GAME__.tp(c.x - 4.6, c.z + 3.6); g.lamp.wick = 0.35; })()`);
+await D(`(() => { ${prep} const c = g.forsaken.cases[0]; window.__GAME__.tp(c.x - 4.6, c.z + 3.6); })()`);
 ok('bones and ghost found', await until(`${G}.forsaken.cases[0].seen`, 240)); await wait(2); await shot('efim-bones');
-await D(`(() => { ${prep} const c = g.forsaken.cases[0]; g.lamp.wick = 1; window.__GAME__.tp(c.x - 0.9, c.z + 0.9); })()`);
+await D(`(() => { ${prep} const c = g.forsaken.cases[0]; window.__GAME__.tp(c.x - 0.9, c.z + 0.9); })()`);
 ok('light burns the ghost away', await until(`${G}.forsaken.cases[0].state === 'quiet'`, 400)); await wait(1.5); await shot('efim-quiet');
 
 // 3) взял Тёму, родителей оставил → их забирают → тени зовут Тёму, он отстаёт
@@ -56,7 +56,7 @@ ok('boy taken along', await D(`${G}.family.state === 'boy' && ${G}.npcs.boy.stat
 await D(`(() => { ${prep} const b = g.npcs.boy; window.__GAME__.tp(100, 96); b.x = 100.8; b.z = 96.6; })()`);
 ok('darkness takes the parents', await until(`${G}.flags.has('familyTaken')`, 400), 'lost ' + (await D(`${G}.story.tally().lost`)));
 await wait(3.5); await shot('family-scream');
-await D(`(() => { ${prep} const b = g.npcs.boy; g.lamp.wick = 0.4; window.__GAME__.tp(g.family.x + 4.4, g.family.z + 3.4); b.x = g.pos.x + 0.8; b.z = g.pos.z + 0.6; })()`);
+await D(`(() => { ${prep} const b = g.npcs.boy; window.__GAME__.tp(g.family.x + 4.4, g.family.z + 3.4); b.x = g.pos.x + 0.8; b.z = g.pos.z + 0.6; })()`);
 ok('ghosts call the boy, he lags', await until(`${G}.flags.has('lureHint') && ${G}.npcs.boy.pace < 1`, 400)); await wait(2.5); await shot('family-ghosts');
 await browser.close();
 if (errors.length) { console.error('ERRORS:\n' + errors.slice(0, 8).join('\n')); process.exit(1); }

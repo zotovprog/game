@@ -20,9 +20,9 @@ export interface SafeLight { x: number; z: number; r: number }
 export interface DarkWorld {
   px: number; pz: number; fx: number; fz: number;     // герой и куда он смотрит
   rx: number; rz: number;                             // «вправо» на экране — для панорамы звука
-  radius: number; wick: number; ember: boolean; active: boolean;
+  radius: number; ember: boolean; active: boolean;
   dread: number;                                      // 0..1 — насколько тьма осмелела
-  repel: boolean;                                     // свет сейчас достаточно ярок, чтобы сжечь бросок
+  repel: boolean;                                     // герой у живого огня: бросок сгорает
   block: boolean;                                     // лампа прикрыта ладонью: бросок бьётся о руку и не достаёт масла
   safe: SafeLight[];
 }
@@ -141,7 +141,7 @@ export class Darkness {
 
       // желанная дистанция: за границей света; при малом круге — внутри него
       let D = w.radius + S.margin + h.off * 0.6 - Math.max(0, S.boldRadius - w.radius) * S.boldDepth;
-      if (named && w.wick < 0.8) D = Math.min(D, w.radius * 0.45);
+      if (named) D = Math.min(D, w.radius * 0.45);              // тех, кого ты бросил, свет не держит
       if (w.ember) D = 0.2;
       D = Math.max(0.2, D);
 

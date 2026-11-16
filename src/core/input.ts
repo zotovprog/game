@@ -1,9 +1,6 @@
 // Ввод: клавиатура по event.code, колёсико, плавающий стик под пальцем. Игра читает действия, не клавиши.
 export class Input {
   moveX = 0; moveY = 0;          // -1..1 в экранных осях (вправо, вверх)
-  wickDelta = 0;                 // накопленное изменение фитиля от колёсика (сбрасывает игра)
-  wickHold = 0;                  // -1 / 0 / 1 пока держат клавишу
-  wickSet: number | null = null; // 0..1 — ползунок фитиля выставлен пальцем
   private keys = new Set<string>();
   private pressed = new Set<string>();
   private ptr = { id: -1, x: 0, y: 0, ox: 0, oy: 0 };   // палец и основание стика
@@ -19,7 +16,6 @@ export class Input {
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     addEventListener('blur', () => { this.keys.clear(); this.ptr.id = -1; });
-    addEventListener('wheel', (e) => { this.wickDelta += -Math.sign(e.deltaY) * 0.08; }, { passive: true });
     if (area) this.bindPointer(area);
   }
 
@@ -74,7 +70,6 @@ export class Input {
     const l = Math.hypot(x, y);
     if (l > 1) { x /= l; y /= l; }
     this.moveX = x; this.moveY = y;
-    this.wickHold = (this.down('KeyE') ? 1 : 0) - (this.down('KeyQ') ? 1 : 0);
   }
   endFrame(): void { this.pressed.clear(); }
 }

@@ -22,8 +22,6 @@ export class Hud {
   private who = el('div', '', 'who');
   private txt = el('div', '', 'txt');
   private opts = el('div', '', 'opts');
-  private wick = el('div', 'wick', 'fade hidden');
-  private wickKnob = el('i');
   private hands = el('div', 'hands', 'fade hidden');
   private draft = el('div', 'draft', 'hidden');
   private speak = el('div', 'speak');
@@ -62,9 +60,6 @@ export class Hud {
       b.addEventListener('contextmenu', (e) => e.preventDefault());
     };
     holdBtn(this.bPour, 'KeyR'); holdBtn(this.bShield, 'ShiftLeft');
-    const sun = el('span'); sun.textContent = '☀';
-    const moon = el('span'); moon.textContent = '☾';
-    this.wick.append(sun, this.wickKnob, moon);
     const pauseBtn = el('button', 'pauseBtn');
     pauseBtn.textContent = '‖';
     pauseBtn.setAttribute('aria-label', TX.paused);
@@ -72,18 +67,11 @@ export class Hud {
     this.goal.append(this.goalText, this.goalArrow);
     this.speak.innerHTML = '<i></i><i></i><i></i>';
     this.draft.innerHTML = `<div class="zone"></div><div class="cur"></div><div class="life"><i></i></div><span>${TX.fanLabel}</span>`;
-    root.append(this.area, this.mark, this.speak, this.oil, this.goal, this.hintEl, this.wick, this.hands, this.draft, this.dialog, this.act, pauseBtn);
+    root.append(this.area, this.mark, this.speak, this.oil, this.goal, this.hintEl, this.hands, this.draft, this.dialog, this.act, pauseBtn);
     // во время разговора тап в любое место экрана — следующая реплика
     this.area.addEventListener('pointerdown', () => { if (this.onDone) this.input.press('Space'); });
     this.act.addEventListener('click', () => this.input.press('Space'));
     this.dialog.addEventListener('pointerdown', (e) => { if (!(e.target as HTMLElement).closest('button')) this.input.press('Space'); });
-    // ползунок фитиля: тянуть вверх — ярче
-    const drag = (e: PointerEvent) => {
-      const r = this.wick.getBoundingClientRect();
-      this.input.wickSet = Math.min(1, Math.max(0, 1 - (e.clientY - r.top - 26) / (r.height - 52)));
-    };
-    this.wick.addEventListener('pointerdown', (e) => { this.wick.setPointerCapture(e.pointerId); drag(e); });
-    this.wick.addEventListener('pointermove', (e) => { if (this.wick.hasPointerCapture(e.pointerId)) drag(e); });
     addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') document.body.classList.add('touch'); });
     if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch');
   }
@@ -104,7 +92,7 @@ export class Hud {
   /** Открыт ли диалог или выбор. */
   get busy(): boolean { return this.onDone !== null || this.onChoice !== null; }
 
-  showHud(on: boolean): void { this.oil.classList.toggle('hidden', !on); this.wick.classList.toggle('hidden', !on); this.hands.classList.toggle('hidden', !on); if (!on) this.goal.classList.add('hidden'); }
+  showHud(on: boolean): void { this.oil.classList.toggle('hidden', !on); this.hands.classList.toggle('hidden', !on); if (!on) this.goal.classList.add('hidden'); }
   /** Кнопки рук: сколько склянок, ход долива, горит ли лампа, прикрыта ли, идёт ли сквозняк. */
   /**
    * Раздувание: шкала тяги с живой полосой и огоньком. draft — где огонёк, c/w — центр и полуширина полосы (0..1),
@@ -175,13 +163,6 @@ export class Hud {
     this.oilFill.style.height = `${Math.max(0, Math.min(100, oil)) * 0.96}%`;
     this.oil.classList.toggle('low', low);
   }
-  /** v — 0..1; locked — руки заняты, фитиль не тронуть. */
-  setWick(v: number, locked: boolean): void {
-    this.wickKnob.style.bottom = `calc(26px + (100% - 52px) * ${v.toFixed(3)} - 13px)`;
-    this.wick.classList.toggle('locked', locked);
-    this.wick.classList.toggle('away', this.busy);
-  }
-
   hint(text: string, secs = 6): void {
     this.hintEl.textContent = text;
     this.hintEl.classList.remove('hidden');

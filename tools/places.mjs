@@ -14,7 +14,7 @@ await page.waitForFunction('window.__GAME__?.ready');
 const places = [['start', 184, 198], ['cart', 161, 183], ['efim', 135.5, 173.5], ['columns', 117, 143], ['water', 108, 181], ['family', 127.5, 118.5], ['vera', 79, 131], ['void', 86, 97], ['mila', 72, 92], ['shade', 73.5, 166], ['throat', 52, 56], ['gate', 31, 37]];
 let n = 0;
 for (const [name, x, z] of places) {
-  await page.evaluate(([x, z, w]) => { const g = window.__GAME__.game; window.__GAME__.tp(x, z); g.lamp.wick = w; g.lamp.oil = 80; }, [x, z, +wick]);
+  await page.evaluate(([x, z, w]) => { const g = window.__GAME__.game; window.__GAME__.tp(x, z); g.lamp.oil = 80; }, [x, z, +wick]);
   await page.waitForTimeout(3500);
   await page.screenshot({ path: `${out}/${String(n++).padStart(2, '0')}-${name}.png` });
   console.log(name, JSON.stringify(await page.evaluate('window.__metrics')).slice(0, 110));

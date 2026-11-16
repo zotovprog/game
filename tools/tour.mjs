@@ -18,7 +18,7 @@ const shot = async (name) => { await page.screenshot({ path: `${out}/${String(n+
 const wait = (s) => page.waitForTimeout(s * 1000);
 const key = async (k) => { await page.keyboard.down(k); await wait(0.12); await page.keyboard.up(k); };
 const D = (expr) => page.evaluate(expr);
-const near = async (what, dx = 1.3, dz = 0.4) => { await D(`(() => { const g = window.__GAME__.game, p = ${what}; g.lamp.oil = Math.max(g.lamp.oil, 70); g.lamp.wick = 0.5; window.__GAME__.tp(p.x + ${dx}, p.z + ${dz}); })()`); await wait(1.2); };
+const near = async (what, dx = 1.3, dz = 0.4) => { await D(`(() => { const g = window.__GAME__.game, p = ${what}; g.lamp.oil = Math.max(g.lamp.oil, 70); window.__GAME__.tp(p.x + ${dx}, p.z + ${dz}); })()`); await wait(1.2); };
 /** Пролистать реплики до выбора или конца разговора. */
 const talk = async () => {
   for (let i = 0; i < 40; i++) {

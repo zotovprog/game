@@ -1,9 +1,8 @@
-// Лампа — единственный ресурс: масло, фитиль, радиус света. Чистая логика без three.js.
+// Лампа — единственный ресурс: масло и круг света, который сжимается вместе с ним. Чистая логика без three.js.
 import { T } from '../data/tuning';
 
 export interface LampState {
   oil: number;        // 0..100
-  wick: number;       // 0..1
   held: boolean;
   ember: number;      // сколько секунд уже горит на последнем издыхании
   snuff: number;      // 0..1 — внешнее «задувание» (порыв ветра), временно
@@ -19,12 +18,11 @@ export interface LampState {
   inZone: boolean;    // тяга сейчас в живой полосе
 }
 
-export const newLamp = (): LampState => ({ oil: T.lamp.startOil, wick: T.lamp.wickDefault, held: false, ember: 0, snuff: 0, lit: true, shield: 0, flasks: T.lamp.startFlasks, pour: 0, falter: 0, draft: 0, draftV: 0, fan: 0, fanT: 0, inZone: false });
+export const newLamp = (): LampState => ({ oil: T.lamp.startOil, held: false, ember: 0, snuff: 0, lit: true, shield: 0, flasks: T.lamp.startFlasks, pour: 0, falter: 0, draft: 0, draftV: 0, fan: 0, fanT: 0, inZone: false });
 
 /** Расход масла в секунду. */
-export function burnRate(wick: number, companions: number): number {   // companions — суммарная «нагрузка», может быть дробной
-  const L = T.lamp;
-  return (L.burnBase + Math.pow(wick, L.burnPow) * L.burnWick) * (1 + companions * L.companionBurn);
+export function burnRate(companions: number): number {   // companions — суммарная «нагрузка», может быть дробной
+  return T.lamp.burn * (1 + companions * T.lamp.companionBurn);
 }
 
 /** Насколько пламя «живо» из-за остатка масла: 1 — полная лампа, oilFloor — на донышке. Круг сжимается вместе с маслом. */
@@ -38,7 +36,7 @@ export function lightRadius(s: LampState): number {
   const L = T.lamp;
   if (s.oil <= 0) return L.emberRadius * (1 - s.snuff * 0.5);
   if (!s.lit) return L.outRadius * (1 + 0.55 * s.fan * (s.inZone ? 1 : 0.5));             // искры: чем ближе к огню, тем виднее
-  let r = (L.radiusMin + (L.radiusMax - L.radiusMin) * s.wick) * oilVigor(s.oil) * (1 - (1 - L.shieldRadius) * s.shield);
+  let r = L.radius * oilVigor(s.oil) * (1 - (1 - L.shieldRadius) * s.shield);
   if (s.falter > 0) r *= (T.fan.rMin + (T.fan.rMax - T.fan.rMin) * s.falter) * (1 + 0.3 * s.fan);       // сбитое пламя: круг сжат и тает
   return Math.max(L.emberRadius, r * (1 - s.snuff) + L.emberRadius * s.snuff);
 }
@@ -48,7 +46,7 @@ export function flamePower(s: LampState): number {
   if (s.oil <= 0) return 0.05 * (1 - s.snuff);
   if (!s.lit) return 0.03 + 0.14 * s.fan * (s.inZone ? 1 : 0.4);
   const falter = s.falter > 0 ? (0.3 + 0.5 * s.falter) * (s.inZone ? 1.15 : 0.85) : 1;
-  return Math.max(0.05, (0.18 + 0.82 * s.wick) * (0.4 + 0.6 * oilVigor(s.oil)) * (1 - s.snuff * 0.92) * (1 - 0.3 * s.shield) * falter);
+  return Math.max(0.05, T.lamp.power * (0.4 + 0.6 * oilVigor(s.oil)) * (1 - s.snuff * 0.92) * (1 - 0.3 * s.shield) * falter);
 }
 
 /** mult — множитель расхода (на глубине тьма сама пьёт масло). */
@@ -56,7 +54,7 @@ export function stepLamp(s: LampState, dt: number, companions: number, mult = 1)
   if (!s.held) return;
   if (!s.lit && s.oil > 0) return;                 // задуло: масло не горит
   if (s.oil > 0) {
-    s.oil = Math.max(0, s.oil - burnRate(s.wick, companions) * mult * dt);
+    s.oil = Math.max(0, s.oil - burnRate(companions) * mult * dt);
     s.ember = 0;
   } else {
     s.ember += dt;

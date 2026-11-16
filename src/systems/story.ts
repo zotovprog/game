@@ -128,7 +128,6 @@ export class Story {
       g.flags.add('goal');
       g.hud.hint(TX.goalHint, 9);
       g.after(1.6, () => { g.hud.whisper(TX.whispers[0], 0.8); g.sfx.whisper(0.6, 0.1); });
-      g.after(11, () => g.hud.hint(g.hud.touch ? TX.hintWickTouch : TX.hintWickKb, 9));
     }, true);
   }
 
@@ -154,7 +153,7 @@ export class Story {
     const g = this.g, n = g.npcs, m = g.mila, sh = g.shade;
     const npc = (c: Npc) => ({ state: c.state === 'crawl' ? 'follow' as const : c.state, x: c.x, z: c.z, goal: c.goal ? { ...c.goal } : null });
     saved = {
-      x: g.pos.x, z: g.pos.z, oil: Math.max(g.lamp.oil, 50), wick: g.lamp.wick, carried: Math.max(g.lamp.flasks, 1), forsaken: g.forsaken.takenIds(), flags: [...g.flags],
+      x: g.pos.x, z: g.pos.z, oil: Math.max(g.lamp.oil, 50), carried: Math.max(g.lamp.flasks, 1), forsaken: g.forsaken.takenIds(), flags: [...g.flags],
       braziers: g.braziers.map((b, i) => (b.f.lit ? i : -1)).filter((i) => i >= 0),
       flasks: g.flasks.map((f, i) => (f.taken && !f.own ? i : -1)).filter((i) => i >= 0),
       holes: g.holes.map((h, i) => (h.done ? i : -1)).filter((i) => i >= 0),
@@ -173,7 +172,7 @@ export class Story {
     g.mode = 'play'; g.hero.setPose('stand', true); g.setStood(); g.takeLamp();
     g.stage.fade = 1;
     for (let i = 0; i <= 20; i++) g.after(0.3 + i * 0.1, () => { g.stage.fade = 1 - i / 20; });
-    g.lamp.oil = s.oil; g.lamp.wick = s.wick; g.lamp.flasks = s.carried; g.lamp.lit = true; g.pos.x = s.x; g.pos.z = s.z;
+    g.lamp.oil = s.oil; g.lamp.flasks = s.carried; g.lamp.lit = true; g.pos.x = s.x; g.pos.z = s.z;
     g.stage.target.set(s.x, 0, s.z);
     for (const f of s.flags) g.flags.add(f);
     for (const i of s.braziers) { const b = g.braziers[i]; b.f.lit = true; b.f.k = 1; }
@@ -602,11 +601,15 @@ export class Story {
     }
     // мать, идущая с тобой, узнаёт дочь издалека
     if (m.state === 'wait' && g.npcs.vera.state === 'follow' && !g.flags.has('reunion') && g.dist(m.x, m.z) < 4.2) this.reunion();
-    // тень: яркий свет жжёт её
+    // тень идёт у края света; открытая лампа вблизи жжёт её — прикрой ладонью или отойди
     if (sh.state === 'follow') {
       this.shadeT += dt;
-      sh.hurt = g.lamp.wick > T.shade.hurtWick ? sh.hurt + dt : Math.max(0, sh.hurt - dt * 0.6);
-      if (sh.hurt > T.shade.warn && !sh.warned) { sh.warned = true; this.line(TX.shade.name, TX.shade.hurt, 'shade', 3.5); }
+      const burning = g.lamp.lit && g.lamp.oil > 0 && g.lamp.shield < 0.5 && g.dist(sh.x, sh.z) < g.radius * T.shade.near;
+      sh.hurt = burning ? sh.hurt + dt : Math.max(0, sh.hurt - dt * 0.6);
+      if (sh.hurt > T.shade.warn && !sh.warned) {
+        sh.warned = true; this.line(TX.shade.name, TX.shade.hurt, 'shade', 3.5);
+        if (!g.flags.has('shadeHurtHint')) { g.flags.add('shadeHurtHint'); g.after(3.6, () => g.hud.hint(g.hud.touch ? TX.shade.hurtHintTouch : TX.shade.hurtHintKb, 7)); }
+      }
       if (sh.hurt < 0.5) sh.warned = false;
       if (sh.hurt > T.shade.burn) {
         sh.state = 'gone'; sh.v.alpha = 0; sh.v.update(0);
@@ -794,7 +797,7 @@ export class Story {
     g.lantern.group.position.set(g.bowl.x, 1.02, g.bowl.z);
     g.lantern.group.rotation.set(0, 0, 0);
     g.hero.carrying = false;
-    g.lamp.wick = 1; g.lamp.oil = Math.max(g.lamp.oil, 30);
+    g.lamp.oil = Math.max(g.lamp.oil, 85);                      // в чаше лампа горит в полную силу
     g.gateOpen = 1;
     g.sfx.ignite();
     g.dark.scatter();
@@ -872,7 +875,7 @@ export class Story {
 }
 
 export interface Snapshot {
-  x: number; z: number; oil: number; wick: number; carried: number; forsaken: ('efim' | 'family' | 'mila')[]; flags: string[];
+  x: number; z: number; oil: number; carried: number; forsaken: ('efim' | 'family' | 'mila')[]; flags: string[];
   braziers: number[]; flasks: number[]; holes: number[]; wisps: string[]; toy: boolean;
   npcs: Record<'efim' | 'vera' | 'boy', { state: Npc['state']; x: number; z: number; goal: { x: number; z: number } | null }>;
   order: ('efim' | 'vera' | 'boy')[];

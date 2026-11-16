@@ -3,15 +3,13 @@ import { T } from '../src/data/tuning';
 import { addOil, burnRate, fanStep, fanZone, isDead, knockFlame, lightRadius, needsFan, newLamp, pourStep, stepLamp } from '../src/systems/lamp';
 
 describe('лампа', () => {
-  it('яркий фитиль жжёт масло быстрее, спутники — ещё быстрее', () => {
-    expect(burnRate(1, 0)).toBeGreaterThan(burnRate(0.3, 0) * 2);
-    expect(burnRate(0.5, 2)).toBeCloseTo(burnRate(0.5, 0) * (1 + 2 * T.lamp.companionBurn));
+  it('спутники жгут масло быстрее', () => {
+    expect(burnRate(2)).toBeCloseTo(burnRate(0) * (1 + 2 * T.lamp.companionBurn));
   });
-  it('круг света растёт с фитилём и сжимается вместе с маслом', () => {
+  it('круг света сжимается вместе с маслом; ладонь делает его меньше', () => {
     const s = newLamp(); s.held = true; s.oil = 100;
-    s.wick = 1; const big = lightRadius(s);
-    s.wick = T.lamp.wickMin; expect(lightRadius(s)).toBeLessThan(big * 0.5);
-    s.wick = 1;
+    const big = lightRadius(s);
+    s.shield = 1; expect(lightRadius(s)).toBeLessThan(big * 0.7); s.shield = 0;
     s.oil = 50; const half = lightRadius(s); expect(half).toBeLessThan(big * 0.9);
     s.oil = 10; expect(lightRadius(s)).toBeLessThan(half * 0.75);
   });
@@ -23,7 +21,7 @@ describe('лампа', () => {
     s.oil = 0; stepLamp(s, T.lamp.emberTime + 0.1, 0); expect(isDead(s)).toBe(true);
   });
   it('масло — отсчёт, но не казнь: стартового хватает на 45–75 с, склянки — на 20–35 с', () => {
-    const rate = burnRate(T.lamp.wickDefault, 0);
+    const rate = burnRate(0);
     expect(T.lamp.startOil / rate).toBeGreaterThan(45); expect(T.lamp.startOil / rate).toBeLessThan(75);
     expect(T.lamp.flask / rate).toBeGreaterThan(20); expect(T.lamp.flask / rate).toBeLessThan(35);
   });

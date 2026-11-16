@@ -34,19 +34,19 @@ await page.waitForFunction('window.__metrics?.mode === "play" && window.__metric
 await wait(3);
 const b0 = await D(`(() => { const g = ${G}, b = g.braziers[0]; return { d: Math.hypot(g.pos.x - b.x, g.pos.z - b.z).toFixed(1), lit: b.f.lit, oil: Math.round(g.lamp.oil), flags: [...g.flags].length }; })()`);
 console.log('resumed at fire:', JSON.stringify(b0)); await shot('resumed');
-// 3) бросок: тусклый фитиль — отпивает масло, яркий — сгорает
-await D(`(() => { const g = ${G}; window.__GAME__.tp(140, 174.5); g.flags.add('firstDark'); g.lamp.oil = 90; g.lamp.wick = 0.4; g.dread = 0.6; g.dark.setCount(3); for (const h of g.dark.hunters) h.cool = 0.5; })()`); await wait(2);
+// 3) бросок: открытая лампа — тьма отпивает масло; прикрытая ладонью — бьётся о руку
+await D(`(() => { const g = ${G}; window.__GAME__.tp(140, 174.5); g.flags.add('firstDark'); g.lamp.oil = 90; g.dread = 0.6; g.dark.setCount(3); for (const h of g.dark.hunters) h.cool = 0.5; })()`); await wait(2);
 const oilA = await D(`${G}.lamp.oil`);
 await page.waitForFunction(`${G}.dark.hunters.some((h) => h.state === 'windup' || h.state === 'lunge')`, null, { timeout: 180000 });
 await shot('windup');
 await page.waitForFunction(`${G}.flags.has('biteHint')`, null, { timeout: 240000 }).catch(() => console.log('no bite within timeout'));
 console.log('bite: oil', oilA.toFixed(0), '→', (await D(`${G}.lamp.oil`)).toFixed(0), 'biteHint', await D(`${G}.flags.has('biteHint')`));
-await D(`(() => { const g = ${G}; g.lamp.oil = 90; g.lamp.wick = 0.9; for (const h of g.dark.hunters) { if (h.state === 'lurk') h.cool = 0.5; } })()`);
+await D(`(() => { const g = ${G}; g.lamp.oil = 90; for (const h of g.dark.hunters) { if (h.state === 'lurk') h.cool = 0.5; } })()`);
 const oilB = await D(`${G}.lamp.oil`);
-await wait(45);
-console.log('bright wick for a while: oil', oilB.toFixed(0), '→', (await D(`${G}.lamp.oil`)).toFixed(0), '(only burning, no bites expected)');
+await page.keyboard.down('ShiftLeft'); await wait(45); await page.keyboard.up('ShiftLeft');
+console.log('palm over the lamp for a while: oil', oilB.toFixed(0), '→', (await D(`${G}.lamp.oil`)).toFixed(0), '(only burning, no bites expected)');
 // 4) вал у глотки
-await D(`(() => { const g = ${G}; g.lamp.oil = 95; g.lamp.wick = 0.8; window.__GAME__.tp(58.4, 64.4); })()`);
+await D(`(() => { const g = ${G}; g.lamp.oil = 95; window.__GAME__.tp(58.4, 64.4); })()`);
 await page.waitForFunction(`${G}.wave.on`, null, { timeout: 120000 });
 await wait(9); await shot('wave');
 console.log('wave on, s =', (await D(`${G}.wave.s`)).toFixed(1), 'oil', (await D(`${G}.lamp.oil`)).toFixed(0), 'dread', (await D(`${G}.dread`)).toFixed(2));

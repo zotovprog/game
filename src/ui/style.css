@@ -46,14 +46,6 @@ html, body { margin: 0; height: 100%; background: var(--void); overflow: hidden;
 .mark.urgent i { border-bottom-color: var(--ember); }
 @keyframes markin { from { opacity: 0; } }
 
-/* фитиль: ползунок у правого края */
-#wick { right: max(6px, env(safe-area-inset-right, 0px)); top: 50%; transform: translateY(-50%); width: 52px; height: min(40vh, 250px);
-  pointer-events: auto; touch-action: none; cursor: ns-resize; display: flex; flex-direction: column; justify-content: space-between; align-items: center;
-  color: var(--ash); font-size: 15px; }
-#wick::before { content: ''; position: absolute; left: 50%; top: 26px; bottom: 26px; width: 1px; background: var(--line); }
-#wick i { position: absolute; left: 50%; width: 26px; height: 26px; margin-left: -13px; border-radius: 50%; border: 1px solid var(--bone-mid);
-  background: rgba(233, 223, 198, 0.16); box-shadow: 0 0 12px rgba(243, 234, 214, 0.35); }
-#wick.locked { opacity: 0.25; pointer-events: none; }
 
 /* руки: склянка и ладонь — справа, под ползунком фитиля */
 #hands { right: max(6px, env(safe-area-inset-right, 0px)); bottom: max(20px, calc(env(safe-area-inset-bottom, 0px) + 14px)); display: flex; flex-direction: column; gap: 12px; align-items: flex-end; }
@@ -77,7 +69,6 @@ html, body { margin: 0; height: 100%; background: var(--void); overflow: hidden;
 #bShield.alert { border-color: var(--ember); animation: pulse 0.45s ease-in-out infinite; }
 body.touch #hands button kbd { display: none; }
 body:not(.touch) #hands button { width: 56px; height: 56px; opacity: 0.75; }
-body.touch #wick { top: 40%; }
 
 #hint { top: max(13%, calc(env(safe-area-inset-top, 0px) + 78px)); left: 50%; transform: translateX(-50%); width: min(78vw, 640px); text-align: center;
   font-size: clamp(17px, 2.3vw, 22px); line-height: 1.45; color: var(--bone-mid); text-shadow: 0 0 12px var(--void), 0 0 3px var(--void); }
@@ -130,7 +121,6 @@ body.touch #wick { top: 40%; }
 body.touch #act kbd, body.touch #dialog button kbd { display: none; }
 body.touch #act { padding: 16px 30px; }
 body.touch #dialog button { padding: 15px 18px; }
-body:not(.touch) #wick { opacity: 0.5; }
 #pauseBtn { right: max(10px, env(safe-area-inset-right, 0px)); top: max(8px, env(safe-area-inset-top, 0px)); pointer-events: auto; font: inherit; background: none; border: none;
   color: var(--ash-lo); font-size: 22px; padding: 12px 14px; cursor: pointer; }
 
@@ -147,7 +137,7 @@ body:not(.touch) #wick { opacity: 0.5; }
 #speak i:nth-child(3) { animation-delay: 0.27s; animation-duration: 0.5s; }
 @keyframes speak { from { height: 3px; } to { height: 15px; } }
 @media (prefers-reduced-motion: reduce) { #speak i { animation: none; height: 9px; } }
-#hands.away, #wick.away { opacity: 0 !important; pointer-events: none !important; }
+#hands.away { opacity: 0 !important; pointer-events: none !important; }
 #hands.away button { pointer-events: none; }
 
 /* раздувание: шкала тяги под героем — живая полоса ходит, огонёк надо удержать в ней */
