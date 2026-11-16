@@ -95,7 +95,7 @@ export class Hud {
     if (x !== null) this.speak.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%)`;
   }
   /** Озвучка: игра возвращает длительность записи в секундах (0 — голоса нет). kind: line — реплика, pre — скоро понадобится, hint, whisper, screen. */
-  onVoice: (kind: 'line' | 'pre' | 'hint' | 'whisper' | 'screen', who: string, text: string) => number = () => 0;
+  onVoice: (kind: 'line' | 'pre' | 'hint' | 'whisper' | 'screen' | 'end', who: string, text: string) => number = () => 0;
   private lastLine = '';
   get speakerName(): string { return this.busy ? this.who.textContent ?? '' : ''; }
   /** Открыт ли диалог или выбор. */
@@ -188,6 +188,7 @@ export class Hud {
   private next(): void {
     const line = this.queue.shift();
     if (line === undefined) {
+      this.onVoice('end', '', '');                                       // разговор кончился или его пролистали — голос обрывается
       const d = this.onDone; this.onDone = null;
       if (!this.onChoice) this.dialog.classList.add('hidden');
       d?.();
@@ -223,6 +224,7 @@ export class Hud {
   private pick(i: number): void {
     if (performance.now() - this.shownAt < 450) return;
     const cb = this.onChoice; this.onChoice = null;
+    this.onVoice('end', '', '');
     this.dialog.classList.add('hidden');
     this.opts.replaceChildren();
     cb?.(i);

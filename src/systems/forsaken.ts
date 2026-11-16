@@ -77,7 +77,7 @@ export class Forsaken {
       if (c.state !== 'taken' || !near) continue;
       if (!c.seen && d < 7.5) { c.seen = true; g.hud.hint(TX.forsaken.found[c.id](this.name(c)), 8); g.sfx.dark('moan', 0, 0.7); g.stage.shake = Math.max(g.stage.shake, 0.25); }
       if ((c.callT -= dt) > 0) continue;
-      c.callT = 4.2 + Math.random() * 2.6;
+      c.callT = 6.5 + Math.random() * 3;
       this.call(c);
     }
   }

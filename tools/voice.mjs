@@ -48,10 +48,11 @@ const N = (text, tag = '[hushed, mysterious]') => add('narrator', text, tag);
 const F = TX.forsaken, E = TX.endings;
 
 // рассказчик — тихий голос самой пещеры
-N([TX.intro, TX.afterLamp, TX.note, TX.goalHint, TX.partyHint, TX.call, TX.cairn, TX.walker, TX.checkpoint, TX.hole.adult, TX.dead, TX.draft,
-  TX.cairnLit, TX.cairnRemember, TX.brazier, TX.seeWisp, TX.wispTrap, TX.water, TX.longDark, TX.gateHall, TX.toy, TX.ownGhost, TX.ownLamp, TX.keeper,
-  TX.vera.taken, TX.mila.carried, TX.shade.nameFalseHint, TX.bowl.empty, TX.bowl.lit, TX.keptFirst].flat());
-N([TX.firstDark, TX.still, TX.biteHint, TX.blockFirst, TX.wave, TX.waveEnd, TX.gust, TX.oilLow, TX.ember, TX.noOil, F.lureHint].flat(), '[tense, urgent whisper]');
+// указания, что делать (цель, отряд, ладонь, фитиль, привал), вслух не читаются — только текстом: голос оставлен истории
+N([TX.intro, TX.afterLamp, TX.note, TX.call, TX.cairn, TX.walker, TX.hole.adult, TX.dead, TX.draft,
+  TX.cairnRemember, TX.seeWisp, TX.wispTrap, TX.water, TX.longDark, TX.gateHall, TX.toy, TX.ownGhost, TX.ownLamp, TX.keeper,
+  TX.vera.taken, TX.mila.carried, TX.shade.nameFalseHint, TX.bowl.empty, TX.bowl.lit].flat());
+N([TX.firstDark, TX.wave, TX.waveEnd, TX.oilLow, TX.ember].flat(), '[tense, urgent whisper]');
 N([F.scream.efim('Ефим'), F.scream.efim('Старик'), F.scream.family(), F.scream.mila(), F.warn.efim, F.warn.family, F.warn.mila, F.cut,
   F.found.efim('Ефим'), F.found.efim('Старик'), F.found.family(), F.found.mila(), F.quiet,
   TX.taken('Ефим'), TX.taken('Вера'), TX.taken('Тёма'), `${TX.taken('Вера')} ${TX.takenMila}`, TX.mila.lost, TX.shade.burned], '[grim, hushed]');

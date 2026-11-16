@@ -50,7 +50,7 @@ export class Story {
   }
   line(who: string, text: string, voice: Voice, secs = 4.5): void {
     const h = this.speakerOf(who);
-    const len = this.g.sfx.say(voice, text, 'free', this.g.panOf(h));
+    const len = this.g.sfx.say(voice, text, 'bark', this.g.panOf(h));
     this.g.hud.hint(`${who}: «${text}»`, Math.max(secs, len + 0.6));
     this.g.sfx.voice(voice);
     if (h) this.barker = { h, until: performance.now() + Math.max(2600, len * 1000) };

@@ -289,14 +289,15 @@ export class Game {
     };
     const ghosts = ['dark', 'efim-ghost', 'vera-ghost', 'mila-ghost', 'father-ghost', 'mother-ghost', 'boy-ghost', 'narrator'];
     hud.onVoice = (kind, who, text) => {
-      if (kind === 'hint') return this.sfx.narrBacklog >= 2 ? 0 : this.sfx.say('narrator', text, 'narr');
-      if (kind === 'screen') return this.sfx.say('narrator', text, 'narr');
+      if (kind === 'end') { this.sfx.dialogCut(); return 0; }
+      if (kind === 'hint') return this.sfx.say('narrator', text, 'hint');
+      if (kind === 'screen') return this.sfx.say('narrator', text, 'screen');
       if (kind === 'whisper') {
-        const pan = who[0] === '<' ? -0.75 : 0.75, role = who.slice(1) || ghosts.find((r) => this.sfx.voiceLen(r, text) > 0);
-        return role ? this.sfx.say(role, text, 'free', pan) : 0;
+        const pan = who[0] === '<' ? -0.75 : 0.75, named = who.slice(1), role = named || ghosts.find((r) => this.sfx.voiceLen(r, text) > 0);
+        return role ? this.sfx.say(role, text, named ? 'ghost' : 'whisper', pan) : 0;
       }
       const role = roles[who];
-      if (role === undefined) return 0;
+      if (role === undefined) { this.sfx.dialogCut(); return 0; }           // герой говорит текстом: прежний голос не должен звучать поверх
       if (kind === 'pre') { this.sfx.preload(role, text); return 0; }
       return this.sfx.say(role, text, 'dialog', role === 'narrator' ? 0 : this.panOf(this.story.speakerOf(who)));
     };

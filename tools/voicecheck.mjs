@@ -26,12 +26,26 @@ const p0 = await D(`${S}.played`);
 await page.keyboard.press('Space');
 ok('Efim speaks with a recorded voice', await until(`${S}.played > ${p0}`, 120), 'len ' + (await D(`${S}.voiceLen('efim', 'Свет… Живой свет. Давно я его не видел.')`)));
 ok('line waits for the voice', await D(`(() => { const d = document.querySelector('#dialog'); return !d.classList.contains('hidden'); })()`));
+// пока человек говорит, рассказчик и тьма молчат
+const pT = await D(`${S}.played`);
+await D(`${G}.hud.hint('Лампа ещё тёплая. Кто-то нёс её до тебя.', 3)`); await D(`${G}.hud.whisper('…останься…', 0.2)`); await wait(1.5);
+ok('nobody talks over a dialogue line', (await D(`${S}.played`)) === pT && (await D(`${S}.sounding`)) <= 1, 'sounding ' + (await D(`${S}.sounding`)));
+// пролистал реплики до конца — голос обрывается
+for (let i = 0; i < 6; i++) { if (await D(`document.querySelectorAll('#dialog .opts button').length`)) break; await page.keyboard.press('Space'); await wait(0.5); }
+await page.click('#dialog .opts button:nth-child(2)'); await wait(0.4);
+for (let i = 0; i < 8; i++) { if (await D(`document.querySelector('#dialog').classList.contains('hidden')`)) break; await page.keyboard.press('Space'); await wait(0.5); }
+ok('skipped dialogue goes silent', await until(`${S}.sounding === 0`, 4), 'sounding ' + (await D(`${S}.sounding`)));
+await wait(4);
 const p1 = await D(`${S}.played`);
 await D(`${G}.hud.whisper('…останься…', 0.2)`);
 ok('darkness whispers with a voice', await until(`${S}.played > ${p1}`, 120));
 const p2 = await D(`${S}.played`);
 await D(`${G}.hud.whisper('Тёма…', 0.8, 'mother-ghost')`);
 ok('ghost calls with a voice', await until(`${S}.played > ${p2}`, 120));
+await wait(7);
+const p3 = await D(`${S}.played`);
+await D(`${S}.death()`); await D(`${G}.hud.onVoice('screen', '', 'Лампа погасла.')`);
+ok('narrator speaks on the death screen', await until(`${S}.played > ${p3}`, 60));
 console.log('voice files fetched:', got.ok, 'failed:', got.bad);
 ok('no failed voice requests', got.bad === 0 && got.ok > 0);
 await browser.close();

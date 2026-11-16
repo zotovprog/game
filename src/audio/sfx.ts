@@ -42,7 +42,7 @@ export class Sfx {
   private tZone = 3; private tPulse = 0; private tSwell = 8; private tHush = 20; private hush = 0; private zoneNow = '';
   private stepFlip = false;
   // записанные голоса
-  private echoIn!: GainNode;
+  private echoIn!: GainNode; private clear!: GainNode;
   private vox = new Map<string, AudioBuffer>();
   private voxLoad = new Map<string, Promise<AudioBuffer | null>>();
   private voxFail = 0;
@@ -50,8 +50,9 @@ export class Sfx {
   private packs = new Map<number, Promise<ArrayBuffer>>();
   private dialogStop: (() => void) | null = null; private dialogToken = 0;
   private narrQ: string[] = []; private narrBusy = false; private narrStop: (() => void) | null = null;
-  /** сколько записанных реплик уже прозвучало (для проверок) */
-  played = 0;
+  private until = { dialog: 0, bark: 0, whisper: -99, ghost: -99 };    // до какого момента (время звука) занят канал / когда шептали в последний раз
+  /** сколько записанных реплик уже прозвучало и сколько звучит сейчас (для проверок) */
+  played = 0; sounding = 0;
 
   get ready(): boolean { return this.ctx !== null; }
   private get now(): number { return this.ctx!.currentTime; }
@@ -68,6 +69,7 @@ export class Sfx {
     this.lp = c.createBiquadFilter(); this.lp.type = 'lowpass'; this.lp.frequency.value = 18000;
     this.master = c.createGain(); this.master.gain.value = 0;
     this.master.connect(this.lp).connect(comp).connect(c.destination);
+    this.clear = c.createGain(); this.clear.connect(comp);            // мимо оглушения: рассказчик на экране гибели и финала
     const conv = c.createConvolver(); conv.buffer = this.impulse(T.cave.tail);
     this.rev = c.createGain(); this.rev.gain.value = 0.55;
     this.rev.connect(conv).connect(this.master);
@@ -300,6 +302,7 @@ export class Sfx {
   /** Шёпот в самое ухо. */
   whisper(pan: number, vol = 0.12): void {
     if (!this.ctx) return;
+    if (this.voiced) vol *= 0.4;                                      // слова теперь произносит записанный голос
     const n = 3 + Math.floor(Math.random() * 3);
     for (let i = 0; i < n; i++) setTimeout(() => this.ctx && this.burst(this.white, 'bandpass', 1500 + Math.random() * 1600, 1300 + Math.random() * 1200, 0.1 + Math.random() * 0.12, vol * (0.5 + Math.random() * 0.5), pan, 0.5, 4), i * 150);
   }
@@ -339,58 +342,82 @@ export class Sfx {
     }
     return p;
   }
-  /** Проиграть запись сквозь пещеру: прямой звук, хвост, повторное эхо; мёртвые двоятся и глуше. */
-  private playVox(buf: AudioBuffer, kind: VoxKind, pan: number, onEnd?: () => void): () => void {
+  /** Проиграть запись сквозь пещеру: прямой звук, хвост, повторное эхо; мёртвые двоятся и глуше. clear — мимо оглушения. */
+  private playVox(buf: AudioBuffer, kind: VoxKind, pan: number, onEnd?: () => void, clear = false): () => void {
     const c = this.ctx!, fx = T.voice[kind];
     const src = c.createBufferSource(); src.buffer = buf; src.playbackRate.value = fx.rate;
     let node: AudioNode = src;
     if (fx.lp) { const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = fx.lp; src.connect(f); node = f; }
     const g = c.createGain(); node.connect(g);
     const p = c.createStereoPanner(); p.pan.value = pan; g.connect(p);
-    p.connect(this.gain(fx.dry, this.master)); p.connect(this.gain(fx.rev, this.rev)); p.connect(this.gain(fx.echo, this.echoIn));
+    p.connect(this.gain(fx.dry, clear ? this.clear : this.master)); p.connect(this.gain(fx.rev, this.rev)); p.connect(this.gain(fx.echo, this.echoIn));
     if (fx.double) {                                                    // второй такой же голос чуть позже и с другой стороны
       const d = c.createDelay(0.5); d.delayTime.value = 0.085;
       const p2 = c.createStereoPanner(); p2.pan.value = pan > 0 ? -0.7 : 0.7;
       g.connect(d).connect(p2); p2.connect(this.gain(fx.dry * 0.6, this.master)); p2.connect(this.gain(fx.rev * 0.7, this.rev));
     }
-    src.onended = () => onEnd?.();
-    src.start(); this.played++;
-    return () => { g.gain.setTargetAtTime(0, c.currentTime, 0.04); try { src.stop(c.currentTime + 0.25); } catch { /* уже кончилась */ } };
+    src.onended = () => { this.sounding--; onEnd?.(); };
+    src.start(); this.played++; this.sounding++;
+    return () => { g.gain.setTargetAtTime(0, c.currentTime, 0.03); try { src.stop(c.currentTime + 0.2); } catch { /* уже кончилась */ } };
   }
+  /** Сейчас говорит человек (реплика диалога или выкрик на ходу). */
+  private get talking(): boolean { return !!this.ctx && this.now < Math.max(this.until.dialog, this.until.bark); }
   /**
-   * Сказать записанную реплику. Канал: dialog — одна реплика за раз (новая обрывает прежнюю);
-   * narr — рассказчик, по очереди; free — поверх всего (призраки, выкрики). Возвращает длительность или 0, если записи нет.
+   * Сказать записанную реплику. Одновременно звучит один голос; старшинство: диалог → выкрик спутника → рассказчик → шёпот.
+   * dialog — реплика разговора (новая обрывает прежнюю и рассказчика); bark — выкрик на ходу; hint — рассказчик, если никто не говорит;
+   * screen — рассказчик на экране гибели/финала, по очереди и мимо оглушения; whisper — тьма, редко; ghost — зов призрака.
+   * Возвращает длительность или 0, если записи нет или сейчас не время.
    */
-  say(role: string, text: string, channel: 'dialog' | 'narr' | 'free' = 'dialog', pan = 0): number {
+  say(role: string, text: string, channel: 'dialog' | 'bark' | 'hint' | 'screen' | 'whisper' | 'ghost' = 'dialog', pan = 0): number {
     const k = voiceKey(role, text), len = this.ctx ? this.voiceLen(role, text) : 0;
+    if (channel === 'dialog') this.dialogCut();
     if (!len) return 0;
-    const kind = voxKind(role);
-    if (channel === 'narr') {
-      if (!this.narrQ.includes(k)) this.narrQ.push(k);
-      this.pumpNarr();
+    const now = this.now, kind = voxKind(role);
+    if (channel === 'screen') { if (!this.narrQ.includes(k)) this.narrQ.push(k); this.pumpNarr(true); return len; }
+    if (channel === 'hint') {
+      if (this.talking || this.narrBusy) return 0;
+      this.narrQ.length = 0; this.narrQ.push(k); this.pumpNarr(false);
       return len;
     }
-    const token = ++this.dialogToken;
-    if (channel === 'dialog') { this.dialogStop?.(); this.dialogStop = null; }
+    if (channel === 'whisper' || channel === 'ghost') {
+      if (this.talking || this.narrBusy || now - this.until[channel] < T.voiceGap[channel] || now - this.until.whisper < 3 || now - this.until.ghost < 3) return 0;
+      this.until[channel] = now;
+      void this.loadVox(k).then((buf) => { if (buf && this.ctx && !this.talking) this.playVox(buf, kind, pan); });
+      return len;
+    }
+    // говорит человек: рассказчик умолкает
+    this.narrQ.length = 0; this.narrStop?.();
+    if (channel === 'bark') {
+      if (now < this.until.dialog) return 0;
+      this.until.bark = now + len;
+      void this.loadVox(k).then((buf) => { if (buf && this.ctx) this.playVox(buf, kind, pan); });
+      return len;
+    }
+    const token = this.dialogToken;
+    this.until.dialog = now + len + 0.3;
     void this.loadVox(k).then((buf) => {
-      if (!buf || !this.ctx || (channel === 'dialog' && token !== this.dialogToken)) return;
-      const stop = this.playVox(buf, kind, pan);
-      if (channel === 'dialog') this.dialogStop = stop;
+      if (!buf || !this.ctx || token !== this.dialogToken) return;
+      this.dialogStop = this.playVox(buf, kind, pan, () => { if (token === this.dialogToken) this.until.dialog = 0; });
     });
     return len;
   }
-  private pumpNarr(): void {
+  /** Реплику пролистали или разговор кончился: голос обрывается сразу. */
+  dialogCut(): void { this.dialogToken++; this.dialogStop?.(); this.dialogStop = null; this.until.dialog = 0; }
+  private pumpNarr(clear: boolean): void {
     if (this.narrBusy) return;
     const k = this.narrQ.shift();
     if (!k) return;
     this.narrBusy = true;
-    const next = () => { this.narrBusy = false; this.narrStop = null; this.pumpNarr(); };
-    void this.loadVox(k).then((buf) => { if (!buf || !this.ctx) { next(); return; } this.narrStop = this.playVox(buf, 'narrator', 0, next); });
+    const next = () => { this.narrBusy = false; this.narrStop = null; this.pumpNarr(clear); };
+    void this.loadVox(k).then((buf) => {
+      if (!buf || !this.ctx) { next(); return; }
+      let live = true;
+      const stop = this.playVox(buf, 'narrator', 0, () => { if (live) next(); }, clear);
+      this.narrStop = () => { live = false; stop(); this.narrBusy = false; this.narrStop = null; };
+    });
   }
-  /** Рассказчик занят или ждёт очереди — подсказку можно не начинать. */
-  get narrBacklog(): number { return this.narrQ.length + (this.narrBusy ? 1 : 0); }
-  /** Оборвать все голоса (новая попытка, гибель). */
-  voiceStop(): void { this.narrQ.length = 0; this.narrStop?.(); this.dialogStop?.(); this.dialogToken++; }
+  /** Оборвать все голоса (новая попытка). */
+  voiceStop(): void { this.narrQ.length = 0; this.narrStop?.(); this.dialogCut(); this.until.bark = 0; }
 
   /** Голос человека: бормотание из нескольких слогов; у детей — выше и короче. */
   voice(kind: Voice): void {
