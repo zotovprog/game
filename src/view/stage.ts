@@ -52,6 +52,8 @@ const GRADE = {
 export class Stage {
   readonly renderer: WebGLRenderer;
   readonly scene = new Scene();
+  /** то, что видно сквозь дым: рисуется после объёмной тьмы */
+  readonly over = new Scene();
   readonly camera: OrthographicCamera;
   readonly composer: EffectComposer;
   readonly grade: ShaderMaterial;
@@ -99,6 +101,9 @@ export class Stage {
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.volume = new VolumePass(this.camera, this.mobile ? 1 : 0);
     this.composer.addPass(this.volume);
+    const overPass = new RenderPass(this.over, this.camera);
+    overPass.clear = false; overPass.clearDepth = false;
+    this.composer.addPass(overPass);
     this.bloom = new UnrealBloomPass(new Vector2(256, 256), style.bloom, 0.75, 0.9);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
@@ -124,6 +129,7 @@ export class Stage {
     this.renderer.setSize(w, h, false);
     this.composer.setSize(w, h);
     const pr = this.renderer.getPixelRatio();
+    if (this.mobile) this.bloom.setSize(w * pr * 0.5, h * pr * 0.5);      // ореол и так размыт: на телефоне считаем его вдвое грубее
     this.volume.setSize(w * pr, h * pr);
     (this.grade.uniforms.uRes.value as Vector2).set(w, h);
     this.updateCamera();

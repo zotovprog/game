@@ -18,7 +18,7 @@ declare global {
   interface Window { __GAME__?: { ready: boolean; game?: Game; tp?: (x: number, z: number) => void }; __metrics?: Record<string, unknown> }
 }
 
-// ?skip=1 — без вступления · ?debug=1 — панель настройки и телепорты · ?reset=1 — забыть след
+// ?calm=1 — без сквозняков · ?skip=1 — без вступления · ?debug=1 — панель настройки и телепорты · ?reset=1 — забыть след
 const params = new URLSearchParams(location.search);
 if (params.has('reset')) { try { localStorage.clear(); } catch { /* пусто */ } }
 const ui = document.getElementById('ui')!;
@@ -30,19 +30,22 @@ let dbg: (() => void) | null = null;
 
 function boot(autostart: boolean): void {
   // убрать прошлую попытку: геометрия и материалы освобождаются, рендерер и звук остаются
-  stage.scene.traverse((o) => {
-    if (o instanceof Mesh || o instanceof Points || o instanceof Sprite) {
-      o.geometry?.dispose();
-      for (const m of Array.isArray(o.material) ? o.material : [o.material]) m.dispose();
-    }
-  });
-  stage.scene.clear();
+  for (const sc of [stage.scene, stage.over]) {
+    sc.traverse((o) => {
+      if (o instanceof Mesh || o instanceof Points || o instanceof Sprite) {
+        o.geometry?.dispose();
+        for (const m of Array.isArray(o.material) ? o.material : [o.material]) m.dispose();
+      }
+    });
+    sc.clear();
+  }
   ui.replaceChildren();
   stage.pressure = 0; stage.chroma = 0; stage.shake = 0;
   const hud = new Hud(ui);
   const input = new Input(hud.area, hud.mark);
   hud.input = input;
   game = new Game(stage, hud, input, sfx, STYLE, def, { skip: params.has('skip') });
+  game.calm = params.has('calm');          // ?calm=1 — без сквозняков (для автопрогонов сюжета)
   const point = savedPoint();
   if (autostart && point) game.story.resume(point); else if (autostart) game.story.begin();
   if (params.has('debug')) {

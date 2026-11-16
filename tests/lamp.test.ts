@@ -22,10 +22,10 @@ describe('лампа', () => {
     addOil(s, T.lamp.flask); stepLamp(s, 0.1, 0); expect(s.ember).toBe(0);
     s.oil = 0; stepLamp(s, T.lamp.emberTime + 0.1, 0); expect(isDead(s)).toBe(true);
   });
-  it('масло — отсчёт, но не казнь: стартового хватает на 50–90 с, склянки — на 30–55 с', () => {
+  it('масло — отсчёт, но не казнь: стартового хватает на 45–75 с, склянки — на 20–35 с', () => {
     const rate = burnRate(T.lamp.wickDefault, 0);
-    expect(T.lamp.startOil / rate).toBeGreaterThan(50); expect(T.lamp.startOil / rate).toBeLessThan(90);
-    expect(T.lamp.flask / rate).toBeGreaterThan(30); expect(T.lamp.flask / rate).toBeLessThan(55);
+    expect(T.lamp.startOil / rate).toBeGreaterThan(45); expect(T.lamp.startOil / rate).toBeLessThan(75);
+    expect(T.lamp.flask / rate).toBeGreaterThan(20); expect(T.lamp.flask / rate).toBeLessThan(35);
   });
   it('доливать надо самому: держать, пока не дольётся; отпустил — сброс', () => {
     const s = newLamp(); s.held = true; s.oil = 20; s.flasks = 2;

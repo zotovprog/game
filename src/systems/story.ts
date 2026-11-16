@@ -48,7 +48,7 @@ export class Story {
       g.hud.say(TX.you, [label], () => cb(i));
     });
   }
-  private line(who: string, text: string, voice: Voice, secs = 4.5): void {
+  line(who: string, text: string, voice: Voice, secs = 4.5): void {
     this.g.hud.hint(`${who}: «${text}»`, secs);
     this.g.sfx.voice(voice);
     const h = this.speakerOf(who);
@@ -152,7 +152,7 @@ export class Story {
     const g = this.g, n = g.npcs, m = g.mila, sh = g.shade;
     const npc = (c: Npc) => ({ state: c.state === 'crawl' ? 'follow' as const : c.state, x: c.x, z: c.z, goal: c.goal ? { ...c.goal } : null });
     saved = {
-      x: g.pos.x, z: g.pos.z, oil: Math.max(g.lamp.oil, 45), wick: g.lamp.wick, flags: [...g.flags],
+      x: g.pos.x, z: g.pos.z, oil: Math.max(g.lamp.oil, 50), wick: g.lamp.wick, carried: Math.max(g.lamp.flasks, 1), forsaken: g.forsaken.takenIds(), flags: [...g.flags],
       braziers: g.braziers.map((b, i) => (b.f.lit ? i : -1)).filter((i) => i >= 0),
       flasks: g.flasks.map((f, i) => (f.taken && !f.own ? i : -1)).filter((i) => i >= 0),
       holes: g.holes.map((h, i) => (h.done ? i : -1)).filter((i) => i >= 0),
@@ -171,7 +171,7 @@ export class Story {
     g.mode = 'play'; g.hero.setPose('stand', true); g.setStood(); g.takeLamp();
     g.stage.fade = 1;
     for (let i = 0; i <= 20; i++) g.after(0.3 + i * 0.1, () => { g.stage.fade = 1 - i / 20; });
-    g.lamp.oil = s.oil; g.lamp.wick = s.wick; g.pos.x = s.x; g.pos.z = s.z;
+    g.lamp.oil = s.oil; g.lamp.wick = s.wick; g.lamp.flasks = s.carried; g.lamp.lit = true; g.pos.x = s.x; g.pos.z = s.z;
     g.stage.target.set(s.x, 0, s.z);
     for (const f of s.flags) g.flags.add(f);
     for (const i of s.braziers) { const b = g.braziers[i]; b.f.lit = true; b.f.k = 1; }
@@ -203,6 +203,7 @@ export class Story {
     }
     sh.isTrue = s.shade.isTrue; sh.state = s.shade.state; sh.x = s.shade.x; sh.z = s.shade.z;
     if (sh.state === 'gone') { sh.v.alpha = 0; sh.v.update(0); }
+    g.forsaken.restore(s.forsaken);
     g.chroma = 0;
   }
 
@@ -248,7 +249,7 @@ export class Story {
     const g = this.g, f = g.flags, m = g.mila;
     const here = g.companions.filter((c) => c.state === 'follow' || c.state === 'camp' || c.state === 'crawl').length + (m.state === 'carried' || m.state === 'vera' || m.state === 'down' ? 1 : 0);
     const found = (f.has('efimMet') ? 1 : 0) + (f.has('veraMet') ? 1 : 0) + (f.has('milaMet') ? 1 : 0) + (f.has('familyMet') ? 4 : 0);
-    const lost = ['efimLost', 'veraLost', 'boyLost', 'milaLost'].filter((k) => f.has(k)).length + (g.npcs.vera.state === 'gone' && f.has('veraLeft') ? 1 : 0);
+    const lost = ['efimLost', 'veraLost', 'boyLost', 'milaLost'].filter((k) => f.has(k)).length + (g.npcs.vera.state === 'gone' && f.has('veraLeft') ? 1 : 0) + g.forsaken.count();
     return { with: here, found, lost };
   }
   /** Тьма схватила отставшего: он зовёт. Ещё можно отбить светом. */
@@ -370,6 +371,9 @@ export class Story {
     const w = g.wisps.find((x) => x.id === g.def.vera.wisp);
     if (w) w.w.out = true;
     g.sfx.snuff(-0.6);
+    const side = (v.x - g.pos.x) * g.stage.right.x + (v.z - g.pos.z) * g.stage.right.z;
+    g.sfx.farScream('vera', Math.max(-0.9, Math.min(0.9, side / 12)));          // её крик слышно издалека
+    g.hud.marker('scream-vera', v.x, v.z, TX.mark.scream, 6);
     g.after(1.2, () => { g.hud.hint(TX.vera.taken, 5); g.sfx.whisper(-0.7, 0.08); });
   }
 
@@ -656,7 +660,8 @@ export class Story {
       g.after(2.5, () => g.hud.hint(TX.firstDark[0], 4.5));
       g.after(8, () => g.hud.hint(TX.firstDark[1], 5));
     } else if (id === 'draft') {
-      g.hud.hint(TX.draft, 8);
+      g.hud.hint(TX.draft, 7);
+      g.after(8, () => g.forceGust());          // первый порыв — здесь же: сразу ясно, зачем ладонь
     } else if (id === 'seeWisp') {
       g.hud.hint(TX.seeWisp, 5);
     } else if (id === 'peek') {
@@ -814,7 +819,7 @@ export class Story {
     if (stayed === 'efim') { lines.push(W.efimStay); below++; }
     else if (efim.state === 'exit') { lines.push(W.efimOut); out++; }
     else if (campOut(efim)) out++;
-    else { below++; if (f.has('efimLost')) lines.push(W.efimLost); else if (f.has('efimLeft')) lines.push(W.efimLeft); }
+    else { below++; if (f.has('efimLost')) lines.push(W.efimLost); else if (f.has('efimTaken')) lines.push(W.efimTaken); else if (f.has('efimLeft')) lines.push(W.efimLeft); }
     // Вера
     if (stayed === 'vera') { lines.push(W.veraStay); below++; }
     else if (vera.state === 'exit') { lines.push(W.veraOut); out++; }
@@ -826,13 +831,13 @@ export class Story {
     else if (f.has('milaLostVera')) { lines.push(W.milaLostVera); below++; }
     else if (m.state === 'carried' && (heroOut || adultOut)) { lines.push(heroOut ? W.milaOut : W.milaOutVera.replace('у матери', 'у чужих людей')); out++; }
     else if (m.state === 'carried') { lines.push(W.milaStay); below++; }
-    else { below++; if (m.state === 'lost' || m.state === 'down') lines.push(W.milaLost); else if (f.has('milaLeft')) lines.push(W.milaLeft); }
+    else { below++; if (f.has('milaTaken')) lines.push(W.milaTaken); else if (m.state === 'lost' || m.state === 'down') lines.push(W.milaLost); else if (f.has('milaLeft')) lines.push(W.milaLeft); }
     // семья
     if (g.family.state === 'fire') { if (beacon) { lines.push(W.familyOut); out += 4; } else { lines.push(W.familyFire); below += 4; } }
     else if (g.family.state === 'boy') {
       if (boy.state === 'exit') { lines.push(W.boyOut); out++; } else if (campOut(boy)) out++; else { below++; if (f.has('boyLost')) lines.push(W.boyLost); }
-      lines.push(W.familyLeftBoy); below += 3;
-    } else { below += 4; if (f.has('familyLeft')) lines.push(W.familyLeft); }
+      lines.push(f.has('familyTaken') ? W.familyTakenBoy : W.familyLeftBoy); below += 3;
+    } else { below += 4; if (f.has('familyTaken')) lines.push(W.familyTaken); else if (f.has('familyLeft')) lines.push(W.familyLeft); }
     // тень
     if (sh.state === 'follow' && sh.isTrue) { lines.push(W.shadeOut); out++; }
     else if (f.has('shadeLiar')) lines.push(W.shadeLiar);
@@ -864,7 +869,7 @@ export class Story {
 }
 
 export interface Snapshot {
-  x: number; z: number; oil: number; wick: number; flags: string[];
+  x: number; z: number; oil: number; wick: number; carried: number; forsaken: ('efim' | 'family' | 'mila')[]; flags: string[];
   braziers: number[]; flasks: number[]; holes: number[]; wisps: string[]; toy: boolean;
   npcs: Record<'efim' | 'vera' | 'boy', { state: Npc['state']; x: number; z: number; goal: { x: number; z: number } | null }>;
   order: ('efim' | 'vera' | 'boy')[];

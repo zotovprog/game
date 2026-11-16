@@ -3,12 +3,14 @@ import { Color, Group, Mesh, MeshBasicMaterial, SphereGeometry, Sprite, Vector3 
 import { Sfx } from '../audio/sfx';
 import { Input } from '../core/input';
 import { clamp, damp, lerp, mulberry32, smooth } from '../core/rng';
-import { loadTrace, Trace } from '../core/save';
+import { loadTrace, saveTrace, Trace } from '../core/save';
 import { LevelDef } from '../data/level';
 import { Style } from '../data/styles';
 import { TX } from '../data/texts';
 import { T } from '../data/tuning';
 import { Darkness, DarkWorld, SafeLight } from '../systems/dark';
+import { Forsaken } from '../systems/forsaken';
+import { Phantoms } from '../systems/phantoms';
 import { addOil, flamePower, isDead, LampState, lightRadius, newLamp, pourStep, stepLamp } from '../systems/lamp';
 import { Story } from '../systems/story';
 import { Hud } from '../ui/hud';
@@ -18,7 +20,7 @@ import { Dust } from '../view/dust';
 import { makeGlow } from '../view/glow';
 import { Human } from '../view/human';
 import { Lantern } from '../view/lantern';
-import { LightPool } from '../view/lightpool';
+import { Emitter, LightPool } from '../view/lightpool';
 import { Candle, Fire, Gate, makeFlask, Wisp } from '../view/props';
 import { Spirit } from '../view/spirit';
 import { Stage } from '../view/stage';
@@ -52,6 +54,8 @@ export class Game {
   readonly face = { x: 0, z: 1 };
   readonly flasks: { g: Group; x: number; z: number; taken: boolean; own: boolean }[] = [];
   readonly braziers: { f: Fire; x: number; z: number }[] = [];
+  /** лампы прежних носителей на пирамидках: зажжённые горят всегда и не подпускают тьму */
+  readonly cairns: { x: number; y: number; z: number; lit: boolean; k: number; glow: Sprite; emitter: Emitter; old: boolean }[] = [];
   readonly wisps: { w: Wisp; id: string; x: number; z: number }[] = [];
   readonly npcs: Record<NpcId, Npc>;
   readonly companions: Npc[] = [];
@@ -71,6 +75,10 @@ export class Game {
   readonly holes: { x: number; z: number; done: boolean; busy: boolean }[] = [];
   /** живые огни этого кадра: рядом с ними тьма не трогает */
   safeLights: SafeLight[] = [];
+  /** без сквозняков — только для автопрогонов */
+  calm = false;
+  readonly phantoms: Phantoms;
+  readonly forsaken: Forsaken;
   mode: Mode = 'menu';
   radius = 2.3;                 // сглаженный радиус круга света
   gateOpen = 0;                 // к чему стремятся Врата
@@ -83,7 +91,7 @@ export class Game {
   private yaw = 2.4;
   beacon: { glow: Sprite; color: number } | null = null;
   private dust: Dust;
-  private campfire: Fire;
+  campfire: Fire;
   private crumbs: { x: number; z: number }[] = [];
   private timers: Timer[] = [];
   private stepAcc = 0;
@@ -106,13 +114,21 @@ export class Game {
   readonly wave = { on: false, s: 99 };
   private lastPos = { x: 0, z: 0 };
   /** сквозняк: ждёт, предупреждает, дует; snuff — насколько он сейчас пригибает пламя */
-  readonly wind = { phase: 'idle' as 'idle' | 'warn' | 'blow', t: 30, exposed: 0, snuff: 0 };
+  readonly wind = { phase: 'idle' as 'idle' | 'warn' | 'blow', t: 30, exposed: 0, snuff: 0, kept: false };
 
 
   constructor(readonly stage: Stage, readonly hud: Hud, readonly input: Input, readonly sfx: Sfx, readonly style: Style, readonly def: LevelDef, opts: { skip: boolean }) {
     const scene = stage.scene;
     this.grid = new Grid(def.w, def.h, def.carves, def.seed);
-    scene.add(buildCave(this.grid, style, def).group);
+    const cave = buildCave(this.grid, style, def);
+    scene.add(cave.group);
+    cave.cairns.forEach((c, i) => {
+      const glow = makeGlow(style.lamp, 0.75, 0.95);
+      glow.position.set(c.x, c.y + 0.04, c.z); glow.visible = false;
+      scene.add(glow);
+      const old = this.trace.cairns.includes(i);
+      this.cairns.push({ ...c, lit: old, k: old ? 1 : 0, glow, old, emitter: { x: c.x, y: c.y + 0.25, z: c.z, color: style.lamp, intensity: 0, distance: 6 } });
+    });
     this.grid.buildFlow(def.gate.bowl[0], def.gate.bowl[1]);
     this.flowStart = Math.max(1, this.grid.flowAt(...this.grid.snap(def.start.hero[0], def.start.hero[1])));
     const snap = (p: [number, number], c = 0.7) => this.grid.snap(p[0], p[1], c);
@@ -258,9 +274,13 @@ export class Game {
 
     this.dark = new Darkness(this.grid);
     this.dark.onSound = (s, pan, vol) => this.sfx.dark(s, pan, vol);
+    this.phantoms = new Phantoms(this.grid, style, stage.over);
+    this.phantoms.onStep = (pan) => this.sfx.dark('knock', pan, 0.16);
+    this.phantoms.onVanish = () => { this.sfx.dark('breath', 0, 0.5); if (!this.flags.has('walkerHint')) { this.flags.add('walkerHint'); this.hud.hint(TX.walker, 5); } };
     this.pool = new LightPool(scene, 3);
     this.dust = new Dust(style.lamp, stage.mobile ? 150 : 280);
     scene.add(this.dust.points);
+    this.forsaken = new Forsaken(this);
     this.story = new Story(this);
     this.story.applyTrace();
 
@@ -275,6 +295,18 @@ export class Game {
     g.position.set(x, 0, z);
     this.stage.scene.add(g);
     this.flasks.push({ g, x, z, taken: false, own });
+  }
+  /** Зажечь лампу на пирамидке от своей: островок света и метка пройденного. Пещера помнит его и в следующий раз. */
+  lightCairn(i: number): void {
+    const c = this.cairns[i], lamp = this.lamp;
+    if (!c || c.lit) return;
+    if (lamp.oil <= T.cairn.cost + 1) { this.hud.hint(TX.noOil, 3); return; }
+    lamp.oil -= T.cairn.cost;
+    c.lit = true;
+    this.sfx.relight(); this.chroma = 0.25;
+    this.hud.hint(this.flags.has('cairnLit') ? TX.cairnAgain : TX.cairnLit, this.flags.has('cairnLit') ? 2 : 8);
+    this.flags.add('cairnLit'); this.flags.add('cairn');
+    if (!this.trace.cairns.includes(i)) { this.trace.cairns.push(i); saveTrace(this.trace); }
   }
   /** Свет в чаше Врат: лампа прежнего носителя или огарок того, кто остался. */
   lightBowl(color: number): void {
@@ -420,34 +452,45 @@ export class Game {
     }
   }
 
-  /** Сквозняк: сначала слышно и видно, что он идёт, потом порыв. Не прикрыл лампу ладонью — гаснет. */
+  /** Сквозняк: сначала слышно и видно, что он идёт, потом порыв. Не прикрыл лампу ладонью — гаснет, и тьма бьёт сразу. */
   private runGust(dt: number, on: boolean): void {
     const W = this.wind, G = T.gust, lamp = this.lamp;
     if (!on) { W.snuff = damp(W.snuff, 0, 6, dt); return; }
     if (W.phase === 'idle') {
       W.snuff = damp(W.snuff, 0, 6, dt);
       if ((W.t -= dt) > 0 || !lamp.lit || lamp.oil <= 0 || this.wave.on) return;
-      W.phase = 'warn'; W.t = this.flags.has('gustHint') ? G.warn : G.firstWarn; W.exposed = 0;
+      const first = !this.flags.has('gustHint');
+      W.phase = 'warn'; W.t = first ? G.firstWarn : G.warn; W.exposed = 0; W.kept = false;
       this.sfx.gustWarn();
-      if (!this.flags.has('gustHint')) { this.flags.add('gustHint'); this.hud.hint(this.hud.touch ? TX.gustHintTouch : TX.gustHintKb, 7); }
+      this.flags.add('gustHint');
+      this.hud.hint(first ? (this.hud.touch ? TX.gustHintTouch : TX.gustHintKb) : (this.hud.touch ? TX.gustTouch : TX.gustKb), first ? 7 : W.t + G.blow);
     } else if (W.phase === 'warn') {
       W.snuff = damp(W.snuff, 0.18 + 0.12 * Math.sin(performance.now() / 60), 8, dt);     // пламя заранее мечется
       if ((W.t -= dt) <= 0) { W.phase = 'blow'; W.t = G.blow; this.sfx.gust(); this.stage.shake = Math.max(this.stage.shake, 0.3); }
     } else {
-      const covered = lamp.shield > 0.6 || this.safeLights.some((s) => Math.hypot(s.x - this.pos.x, s.z - this.pos.z) < s.r * 0.6);
+      const byFire = this.safeLights.some((s) => Math.hypot(s.x - this.pos.x, s.z - this.pos.z) < s.r * 0.6);
+      const covered = lamp.shield > 0.6 || byFire;
+      if (lamp.shield > 0.6 && !byFire) W.kept = true;
       W.snuff = damp(W.snuff, covered ? 0.25 : 0.85, 10, dt);
       if (!covered && lamp.lit && (W.exposed += dt) > G.exposed) {
-        lamp.lit = false; lamp.pour = 0;
-        this.sfx.snuff(); this.chroma = 0.8;
-        this.hud.hint(this.hud.touch ? TX.outHintTouch : TX.outHintKb, 8);
+        lamp.lit = false; lamp.pour = 0; W.kept = false;
+        this.sfx.snuff(); this.chroma = 0.8; this.stage.shake = Math.max(this.stage.shake, 0.5);
+        // в темноте она не ждёт: бросок идёт сразу и пьёт почти вдвое
+        for (const h of this.dark.hunters) h.cool = Math.min(h.cool, 0.25 + this.rng() * 0.5);
+        const outs = this.count('outs');
+        this.hud.hint(outs === 1 ? (this.hud.touch ? TX.outHintTouch : TX.outHintKb) : (this.hud.touch ? TX.outTouch : TX.outKb), outs === 1 ? 9 : 5);
       }
       if ((W.t -= dt) <= 0) {
         W.phase = 'idle';
+        if (W.kept && lamp.lit) { const n = this.count('kept'); if (n <= 3) this.hud.hint(n === 1 ? TX.keptFirst : TX.kept, n === 1 ? 6 : 2.5); }
         const kind = this.grid.kindAt(this.pos.x, this.pos.z), [lo, hi] = G.every[kind] ?? G.every.rubble;
         W.t = (lo + this.rng() * (hi - lo)) * (1.15 - 0.4 * this.dread);
       }
     }
   }
+  private counts = new Map<string, number>();
+  /** Сколько раз это уже случалось (для подсказок, которые со временем короче). */
+  private count(key: string): number { const n = (this.counts.get(key) ?? 0) + 1; this.counts.set(key, n); return n; }
   /** Срежиссированный первый порыв (учит прикрывать лампу). */
   forceGust(): void { if (this.wind.phase === 'idle') this.wind.t = 0; }
 
@@ -502,7 +545,8 @@ export class Game {
       const n = this.npcs, s = this.story;
       if (!this.flags.has('dead')) near(this.deadAt.x, this.deadAt.z, 1.5, TX.promptDead, () => s.examineDead());
       for (const b of this.braziers) if (!b.f.lit) near(b.x, b.z, 1.7, TX.promptBrazier, () => s.lightBrazier(b.f));
-      if (n.efim.state === 'wait') near(n.efim.x, n.efim.z, 2.1, TX.promptTalk, () => s.talkEfim());
+      if (this.lamp.lit && this.lamp.oil > 0) this.cairns.forEach((c, i) => { if (!c.lit) near(c.x, c.z, T.cairn.reach, TX.promptCairn, () => this.lightCairn(i)); });
+      if (n.efim.state === 'wait' || n.efim.state === 'left') near(n.efim.x, n.efim.z, 2.1, TX.promptTalk, () => s.talkEfim());
       if (n.vera.state === 'wait') near(n.vera.x, n.vera.z, 2.1, TX.promptTalk, () => s.talkVera());
       if (this.family.state === 'wait') near(this.family.x, this.family.z, 2.6, TX.promptTalk, () => s.talkFamily());
       if (this.mila.state === 'wait') near(this.mila.x, this.mila.z, 1.9, TX.promptTalk, () => s.talkMila());
@@ -574,7 +618,7 @@ export class Game {
     if (did === 'poured') { this.sfx.pickup(); this.sfx.relight(); this.chroma = 0.3; }
     if (did === 'relit') { this.sfx.relight(); this.dark.scatter(); hud.hint(TX.relit, 3); }
     this.hero.shield = lamp.shield; this.hero.pour = lamp.pour > 0 ? 1 : 0;
-    this.runGust(dt, live && lamp.held && this.flags.has('firstDark'));
+    this.runGust(dt, live && lamp.held && this.flags.has('firstDark') && !this.calm);
     lamp.snuff = Math.max(this.gust, this.wind.snuff);
     const wasOil = lamp.oil;
     let load = 0;
@@ -595,7 +639,7 @@ export class Game {
     this.lantern.update(t, power, this.radius, this.style.lampGain);
     this.lantern.group.getWorldPosition(this.lampWorld);
 
-    if (live) { this.interact(); this.party(dt); this.story.zones(); this.story.wisps(); this.story.drama(dt); } else hud.prompt(null);
+    if (live) { this.interact(); this.party(dt); this.story.zones(); this.story.wisps(); this.story.drama(dt); this.forsaken.update(dt, t); } else hud.prompt(null);
 
     // огни мира
     beginDarkLights(); this.pool.begin();
@@ -613,6 +657,17 @@ export class Game {
     this.campfire.update(t, dt);
     fire(this.family.fire, this.family.x, this.family.z);
     for (const b of this.braziers) fire(b.f, b.x, b.z);
+    for (const c of this.cairns) {
+      if (!c.lit) continue;
+      c.k = damp(c.k, 1, 2.2, dt);
+      const fl = 0.9 + 0.1 * Math.sin(t * 9 + c.x * 3.1) * Math.sin(t * 5.3 + c.z);
+      c.glow.visible = true; c.glow.scale.setScalar(0.75 * (0.5 + 0.5 * c.k) * fl);
+      if (this.dist(c.x, c.z) > 30) continue;
+      const r = T.cairn.radius * c.k;
+      c.emitter.intensity = 9 * c.k * fl;
+      addDarkLight(c.x, 1, c.z, r); this.pool.add(c.emitter); safe.push({ x: c.x, z: c.z, r: r * 0.85 });
+      if (c.old && !this.flags.has('cairnOld') && this.dist(c.x, c.z) < 3.2) { this.flags.add('cairnOld'); hud.hint(TX.cairnRemember, 6); }
+    }
     for (const w of this.wisps) {
       w.w.update(t, dt);
       if (w.w.k > 0.02) { addDarkLight(w.x, 1, w.z, T.wisp.glow * w.w.k); this.pool.add(w.w.emitter); }
@@ -659,6 +714,7 @@ export class Game {
     if (lamp.pour > 0) for (const h of this.dark.hunters) h.cool -= dt;          // пока льёшь, она торопится
     if (inSafe) w.repel = true;
     const touched = this.dark.update(dt, w);
+    if (this.dark.blocked && live) { this.chroma = Math.max(this.chroma, 0.35); S.shake = Math.max(S.shake, 0.25); const n = this.count('block'); if (n <= 2) hud.hint(n === 1 ? TX.blockFirst : TX.block, n === 1 ? 6 : 2.5); }
     if (touched && live && this.gust < 0.1) {
       if (this.ember) this.die();
       else {
@@ -670,6 +726,9 @@ export class Game {
       }
     }
     if (live && isDead(lamp)) this.die();
+    // те, кого нет: глаза за краем света и идущий по его границе
+    const plights = darkU.uLights.value.slice(0, darkU.uLightCount.value).map((v) => ({ x: v.x, z: v.z, r: v.w }));
+    this.phantoms.update(dt, t, { px: this.pos.x, pz: this.pos.z, radius: this.radius, lit: lamp.lit && lamp.oil > 0, dread: this.dread, active: w.active || (live && lamp.held && !lamp.lit && this.flags.has('firstDark')), lights: plights, rx: S.right.x, rz: S.right.z });
 
     // шёпот из темноты и реплики спутников
     if (live && lamp.held) {

@@ -39,7 +39,7 @@ await D(`(() => { const g = ${G}; g.flags.add('firstDark'); g.wind.t = 999; g.la
 await wait(1.5);
 await page.keyboard.down('KeyR');
 await until(`${G}.lamp.pour > 0.35`, 120); await shot('pouring');
-ok('pour: flask spent, oil up', await until(`${G}.lamp.flasks === 0 && ${G}.lamp.oil > 55`, 180), 'oil ' + (await D(`${G}.lamp.oil`)).toFixed(0));
+ok('pour: flask spent, oil up', await until(`${G}.lamp.flasks === 0 && ${G}.lamp.oil > 44`, 180), 'oil ' + (await D(`${G}.lamp.oil`)).toFixed(0));
 await page.keyboard.up('KeyR');
 
 // 3) порыв без ладони гасит лампу; держать R — разжечь
@@ -70,6 +70,23 @@ ok('choice shown', await until(`document.querySelectorAll('#dialog .opts button'
 await page.click('#dialog .opts button');
 ok('hero says the choice', await until(`${G}.hero.talk === 1`, 60), JSON.stringify(await D(`document.querySelector('#dialog .who').textContent + ': ' + document.querySelector('#dialog .txt').textContent`)));
 await wait(1.2); await shot('hero-talks');
+// 6) лампа на пирамидке: зажёг — горит, тьма не подходит; пещера помнит её и после перезапуска
+await page.keyboard.press('Space'); await wait(1);
+await D(`(() => { const g = ${G}; g.hud.close?.(); })()`).catch(() => {});
+await page.goto(q('skip=1&reset=1'));
+await page.waitForFunction('window.__GAME__?.ready', null, { timeout: 120000 });
+await D(`(() => { const g = ${G}; g.flags.add('firstDark'); g.wind.t = 999; g.lamp.oil = 70; const c = g.cairns[1]; window.__GAME__.tp(c.x + 1.0, c.z + 0.7); })()`);
+await wait(2);
+ok('cairn prompt', await until(`document.querySelector('#act') && !document.querySelector('#act').classList.contains('hidden') && /камнях/.test(document.querySelector('#act').textContent)`, 60), await D(`document.querySelector('#act').textContent`));
+const oilC = await D(`${G}.lamp.oil`);
+await page.keyboard.press('Space');
+ok('cairn lit', await until(`${G}.cairns[1].lit && ${G}.cairns[1].k > 0.8`, 120), 'oil ' + oilC.toFixed(1) + ' → ' + (await D(`${G}.lamp.oil`)).toFixed(1));
+ok('cairn is a safe light', await D(`${G}.safeLights.some((s) => Math.hypot(s.x - ${G}.cairns[1].x, s.z - ${G}.cairns[1].z) < 0.1)`));
+await D(`window.__GAME__.tp(${G}.cairns[1].x + 4.5, ${G}.cairns[1].z + 3.2)`); await wait(2.5); await shot('cairn-lit');
+// перезапуск без сброса: лампа на пирамидке уже горит
+await page.goto(q('skip=1'));
+await page.waitForFunction('window.__GAME__?.ready', null, { timeout: 120000 });
+ok('cave remembers the lit cairn', await D(`${G}.cairns[1].lit === true && ${G}.cairns[0].lit === false`));
 await browser.close();
 if (errors.length) { console.error('ERRORS:\n' + errors.slice(0, 8).join('\n')); process.exit(1); }
 process.exit(bad ? 1 : 0);

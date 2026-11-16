@@ -8,7 +8,7 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
-await page.goto(base + '?skip=1&reset=1');
+await page.goto(base + '?skip=1&reset=1&calm=1');
 await page.waitForFunction('window.__GAME__?.ready', null, { timeout: 120000 });
 const D = (e) => page.evaluate(e);
 const wait = (s) => page.waitForTimeout(s * 1000);

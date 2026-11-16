@@ -14,7 +14,7 @@ const SUB = 2, STEP = 1 / SUB, CH = 16;
 const WALL_H: Record<Kind, number> = { rubble: 3.0, mine: 2.8, columns: 3.5, water: 3.2, void: 2.4, fissure: 3.4, gate: 4.2 };
 const TONE: Record<Kind, number> = { rubble: 1, mine: 0.92, columns: 1.06, water: 0.72, void: 0.8, fissure: 0.95, gate: 1.1 };
 
-export interface Cave { group: Group; dispose(): void }
+export interface Cave { cairns: { x: number; y: number; z: number }[]; group: Group; dispose(): void }
 interface Inst { m: Matrix4; c: Color }
 
 /** Мягко мнёт геометрию шумом и пересчитывает гладкие нормали. */
@@ -253,6 +253,7 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
   const lampGeo = new BoxGeometry(0.13, 0.2, 0.13);
   trash.push(lampGeo);
   const deadLamps: Inst[] = [];
+  const cairns: { x: number; y: number; z: number }[] = [];
   for (const cp of def.cairns) {
     const [x, z] = grid.snap(cp[0], cp[1], 0.6);
     let y = 0;
@@ -264,6 +265,7 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
     }
     e.set(0.25, rng() * 6.28, 0.1); q.setFromEuler(e);
     deadLamps.push({ m: new Matrix4().compose(p.set(x, y + 0.1, z), q, s.set(1, 1, 1)), c: new Color(1, 1, 1) });
+    cairns.push({ x, y: y + 0.1, z });
     grid.obstacles.push({ x, z, r: 0.4 });
   }
   // выработка: ящики, бочки, брошенные доски
@@ -390,5 +392,5 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
     trash.push(water.geometry, water.material as MeshLambertMaterial);
   }
 
-  return { group, dispose() { trash.forEach((d) => d.dispose()); } };
+  return { group, cairns, dispose() { trash.forEach((d) => d.dispose()); } };
 }

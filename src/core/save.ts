@@ -4,9 +4,10 @@ export interface Trace {
   lastDeath: { x: number; z: number } | null;
   beacon: boolean;                  // в прошлый раз ты остался маяком
   endings: string[];
+  cairns: number[];                 // лампы на пирамидках, которые ты уже зажёг: горят и в следующий раз
 }
 const KEY = 'cave-remembers.v1';
-const blank = (): Trace => ({ runs: 0, lastDeath: null, beacon: false, endings: [] });
+const blank = (): Trace => ({ runs: 0, lastDeath: null, beacon: false, endings: [], cairns: [] });
 
 export function loadTrace(): Trace {
   try {

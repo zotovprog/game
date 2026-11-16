@@ -1,7 +1,7 @@
 // Реквизит: костёр/жаровня, ложный огонёк, склянка масла, огарок, Врата с чашей.
 import {
   BoxGeometry, Color, ConeGeometry, CylinderGeometry, Group, IcosahedronGeometry, Mesh, MeshBasicMaterial,
-  MeshStandardMaterial, Sprite,
+  MeshStandardMaterial, Sprite, TorusGeometry, Vector3,
 } from 'three';
 import { mulberry32, vnoise } from '../core/rng';
 import { Style } from '../data/styles';
@@ -119,6 +119,31 @@ export class Wisp {
 }
 
 /** Склянка масла: стоит на полу и светит ровно, без дрожи. */
+/** Кости на месте того, кого забрала тьма: череп, рёбра, длинные кости вразброс. */
+export function makeBones(seed: number, small = false): Group {
+  const rng = mulberry32(Math.floor(Math.abs(seed) * 97) + 3), g = new Group(), k = small ? 0.62 : 1;
+  const mat = darkify(new MeshStandardMaterial({ color: new Color(0xb4ac9b), roughness: 0.95, flatShading: true }));
+  const skull = new Mesh(new IcosahedronGeometry(0.105 * k, 1), mat);
+  skull.scale.set(1, 0.92, 1.18); skull.position.set((rng() - 0.5) * 0.3, 0.085 * k, (rng() - 0.5) * 0.3); skull.rotation.set(rng() * 0.6, rng() * 6.28, rng() * 0.5);
+  const jaw = new Mesh(new BoxGeometry(0.1 * k, 0.03 * k, 0.07 * k), mat);
+  jaw.position.copy(skull.position).add(new Vector3(0.09 * k, -0.05 * k, 0.07 * k)); jaw.rotation.y = rng() * 6.28;
+  g.add(skull, jaw);
+  for (let i = 0; i < 6; i++) {                                // рёбра дугой
+    const rib = new Mesh(new TorusGeometry(0.13 * k, 0.011 * k, 4, 7, Math.PI * 0.9), mat);
+    rib.position.set(-0.28 * k + i * 0.035 * k, 0.03 + i * 0.006, 0.18 * k + (rng() - 0.5) * 0.05); rib.rotation.set(Math.PI / 2 + (rng() - 0.5) * 0.5, 0, 0.3 + (rng() - 0.5) * 0.5);
+    g.add(rib);
+  }
+  for (let i = 0; i < 7; i++) {                                // руки и ноги
+    const len = (0.24 + rng() * 0.2) * k;
+    const b = new Mesh(new CylinderGeometry(0.016 * k, 0.02 * k, len, 5), mat);
+    const a = rng() * 6.28, r = 0.15 + rng() * 0.4;
+    b.position.set(Math.cos(a) * r * k, 0.022, Math.sin(a) * r * k); b.rotation.set(Math.PI / 2 + (rng() - 0.5) * 0.25, 0, rng() * 6.28);
+    g.add(b);
+  }
+  g.traverse((o) => { o.castShadow = true; o.receiveShadow = true; });
+  return g;
+}
+
 export function makeFlask(style: Style): Group {
   const g = new Group();
   const glass = new Mesh(new CylinderGeometry(0.07, 0.09, 0.2, 6), new MeshBasicMaterial({ color: new Color(style.lamp).multiplyScalar(0.75) }));

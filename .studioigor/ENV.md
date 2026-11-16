@@ -16,7 +16,7 @@ VERIFIED: no
 | playwright (системный, симлинк в node_modules) | chromium 1243 | съёмка кадров |
 
 ## Agent integrations
-Облачная сессия: редактора и MCP нет, игра — код. Агент видит игру через Playwright: tools/shot.mjs (кадр), tools/places.mjs (все места уровня), tools/tour.mjs (сюжет и выборы до финала), tools/tour2.mjs (вступление, гибель, след, телефон), tools/party.mjs (ядро: цель, захват, спасение, привал, потеря), tools/dark.mjs (тьма при разном свете), tools/check.mjs (точка возврата, бросок, вал), tools/hands.mjs (долив, ветер, розжиг, диалоги), tools/perf.mjs (вызовы отрисовки, треугольники, время кадра — сравнивать «до/после»), tools/capture.mjs. Сборку удобнее проверять без сервера: `node tools/artifact.mjs <файл>` и открыть его как file://. Пользователь играет по ссылке-артефакту (tools/artifact.mjs склеивает dist/ в один HTML).
+Облачная сессия: редактора и MCP нет, игра — код. Агент видит игру через Playwright: tools/shot.mjs (кадр), tools/places.mjs (все места уровня), tools/tour.mjs (сюжет и выборы до финала), tools/tour2.mjs (вступление, гибель, след, телефон), tools/party.mjs (ядро: цель, захват, спасение, привал, потеря), tools/dark.mjs (тьма при разном свете), tools/check.mjs (точка возврата, бросок, вал), tools/hands.mjs (долив, ветер, розжиг, диалоги, лампа на пирамидке), tools/forsaken.mjs (глаза, идущий, крик, кости, тени зовут Тёму), tools/perf.mjs (вызовы отрисовки, треугольники, время кадра — сравнивать «до/после»), tools/capture.mjs. Сборку удобнее проверять без сервера: `node tools/artifact.mjs <файл>` и открыть его как file://. Пользователь играет по ссылке-артефакту (tools/artifact.mjs склеивает dist/ в один HTML).
 
 ## Commands
 RUN: npm run dev

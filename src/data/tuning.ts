@@ -5,9 +5,9 @@ export const T = {
     wickMin: 0.15, wickMax: 1, wickDefault: 0.55, wickRate: 0.9,   // доля в секунду при удержании
     radiusMin: 2.4, radiusMax: 7.2,                                 // радиус по фитилю при полной лампе
     oilFloor: 0.3,                                                  // доля радиуса, когда масло на нуле: круг сжимается вместе с маслом
-    burnBase: 0.36, burnWick: 1.35, burnPow: 1.5,                   // масло/с = base + wick^pow * burnWick: полной лампы хватает на ~110 с
-    startOil: 60, flask: 38, ownLamp: 25,
-    startFlasks: 1, maxFlasks: 3,                                   // склянки носишь с собой и доливаешь сам
+    burnBase: 0.42, burnWick: 1.55, burnPow: 1.5,                   // масло/с = base + wick^pow * burnWick: полной лампы хватает на ~95 с
+    startOil: 60, flask: 27, ownLamp: 25,
+    startFlasks: 1, maxFlasks: 2,                                   // склянки носишь с собой и доливаешь сам
     pourTime: 2.0,              // столько секунд стоишь и льёшь
     relightTime: 2.2, relightCost: 2, outRadius: 0.95,              // лампу задуло: разжечь заново, стоя в темноте
     shieldRadius: 0.58, shieldSpeed: 0.55,                          // прикрыл ладонью: круг меньше, идёшь медленнее
@@ -17,7 +17,7 @@ export const T = {
   },
   // сквозняк: предупреждение, потом порыв; не прикрыл лампу — гаснет
   gust: { warn: 1.4, blow: 1.5, exposed: 0.45, firstWarn: 2.6,
-    every: { void: [13, 22], fissure: [20, 34], water: [28, 44], rubble: [48, 80], mine: [48, 80], columns: [40, 66], gate: [60, 90] } as Record<string, [number, number]> },
+    every: { void: [11, 19], fissure: [15, 26], water: [22, 36], rubble: [26, 44], mine: [28, 46], columns: [22, 38], gate: [45, 70] } as Record<string, [number, number]> },
   // страх нарастает: от входа к Вратам тьма злее, броски чаще, масло горит быстрее
   dread: {
     start: 0.12, deep: 0.92,     // у места пробуждения и у Врат
@@ -39,6 +39,13 @@ export const T = {
   },
   fire: { radius: 4.6 },
   candle: { radius: 1.7 },
+  // те, кого нет: глаза в темноте и идущий по краю света
+  phantom: { maxEyes: 7, eyesPerDread: 3, eyesOut: 6, eyeSize: 0.14, eyeGlow: 0.72, eyeLife: [2.5, 7] as [number, number], eyeGap: [4, 13] as [number, number],
+    walkSpeed: 1.15, walkTime: 5.5, walkGap: [22, 48] as [number, number] },
+  // брошенных забирает тьма: когда ты отошёл на столько метров и прошло столько секунд
+  forsaken: { away: 17, wait: 9, near: 11, burn: 0.75, lure: 9, lurePace: 0.45 },
+  // лампы прежних носителей на пирамидках: зажёг — горит всегда, пещера это помнит
+  cairn: { cost: 3, radius: 3.4, reach: 1.7 },
   wisp: { snuff: 2.7, glow: 1.5 },
   shade: { hurtWick: 0.62, warn: 2, burn: 6.5 },   // тень терпит свет не ярче hurtWick
   mila: { alone: 7 },                              // столько секунд ребёнок выдержит без света

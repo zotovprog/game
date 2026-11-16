@@ -349,6 +349,26 @@ export class Sfx {
     for (let i = 0; i < 7; i++) { const f = 620 + i * 133 + Math.random() * 60; this.tone('sawtooth', f, f * (1.25 + Math.random() * 0.3), 0.75, 0.05, i % 2 ? 0.7 : -0.7, 0.8, 0.008); }
     this.burst(this.white, 'bandpass', 2200, 5200, 0.6, 0.3, 0, 0.8, 0.9);
   }
+  /** Далёкий человеческий крик: тянется, срывается и обрывается. Почти одно эхо — он далеко. */
+  farScream(kind: Voice, pan: number): void {
+    if (!this.ctx) return;
+    const c = this.ctx, t = this.now, d = 1.5 + Math.random() * 0.5;
+    const base = { efim: 185, vera: 400, father: 215, mother: 440, mila: 600, boy: 540, shade: 480 }[kind];
+    const form = { efim: 900, vera: 1300, father: 950, mother: 1400, mila: 1700, boy: 1600, shade: 1500 }[kind];
+    const o = c.createOscillator(); o.type = 'sawtooth';
+    o.frequency.setValueAtTime(base, t); o.frequency.linearRampToValueAtTime(base * 1.9, t + 0.3);
+    o.frequency.linearRampToValueAtTime(base * 1.65, t + d * 0.8); o.frequency.linearRampToValueAtTime(base * 0.75, t + d);
+    const vib = c.createOscillator(); vib.frequency.value = 8.5;
+    const vg = c.createGain(); vg.gain.value = base * 0.07; vib.connect(vg).connect(o.frequency);
+    const b = c.createBiquadFilter(); b.type = 'bandpass'; b.frequency.value = form; b.Q.value = 1.5;
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1900;                 // далеко: верхов почти нет
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.5, t + 0.14);
+    g.gain.setValueAtTime(0.5, t + d * 0.86); g.gain.linearRampToValueAtTime(0.0001, t + d);            // обрывается
+    const p = c.createStereoPanner(); p.pan.value = pan;
+    o.connect(b).connect(lp).connect(g).connect(p); p.connect(this.gain(0.3, this.master)); p.connect(this.gain(1.7, this.rev));
+    o.start(t); vib.start(t); o.stop(t + d + 0.05); vib.stop(t + d + 0.05);
+  }
   /** Тьма смыкается: всё глохнет. */
   death(): void {
     if (!this.ctx) return;

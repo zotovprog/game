@@ -10,7 +10,7 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-await page.goto(base + '?skip=1&reset=1');
+await page.goto(base + '?skip=1&reset=1&calm=1');
 await page.waitForFunction('window.__GAME__?.ready');
 let n = 0;
 const m = () => page.evaluate('window.__metrics');

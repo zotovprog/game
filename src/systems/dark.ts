@@ -36,6 +36,8 @@ export class Darkness {
   /** 0..1 — как близко ближайший язык тьмы (для звука и давления) */
   nearness = 0;
   nearestAngle = 0;
+  /** сколько бросков за этот кадр разбилось о ладонь */
+  blocked = 0;
   /** Тьма подаёт голос: тип, панорама −1..1, громкость 0..1 */
   onSound: (s: DarkSound, pan: number, vol: number) => void = () => {};
 
@@ -96,6 +98,7 @@ export class Darkness {
   /** Возвращает язык тьмы, который дотянулся до героя, если такой есть. */
   update(dt: number, w: DarkWorld): Hunter | null {
     const S = T.spirits;
+    this.blocked = 0;
     let touched: Hunter | null = null;
     let near = 0, tn = 0;
     const tend = darkU.uTendrils.value;
@@ -125,7 +128,7 @@ export class Darkness {
         else if (h.burn < 0.05 && !h.fake) {
           // дотянулась: яркий свет сжигает бросок, тусклый — она отпивает масло
           if (w.repel) { h.burn = 0.06; this.onSound('sizzle', 0, 1); }
-          else if (w.block) { h.burn = 0.06; this.onSound('knock', 0, 1); }
+          else if (w.block) { h.burn = 0.06; this.blocked++; this.onSound('knock', 0, 1); }
           else { touched = h; h.state = 'gone'; h.timer = S.respawn; h.alpha = 0; h.cool = this.cooldown(w.dread, named); continue; }
         }
         if (h.burn >= 0.05 || h.fake && dist <= 1.0 || h.run > T.dread.lungeReach) h.burn = Math.min(1, Math.max(h.burn, 0.05) + dt * 2.0);
