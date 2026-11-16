@@ -64,7 +64,7 @@ export class Forsaken {
         gh.v.update(t);
         if (gh.burn >= 1) {
           gh.gone = true; gh.v.alpha = 0; gh.v.update(t); g.phantoms.unpin(gh.x, gh.z);
-          g.sfx.dark('sizzle', 0, 0.8); g.hud.whisper(TX.forsaken.last[c.id]);
+          g.sfx.dark('sizzle', 0, 0.8); g.hud.whisper(TX.forsaken.last[c.id], Math.random(), `${gh.voice}-ghost`);
           continue;
         }
         alive++;
@@ -97,7 +97,7 @@ export class Forsaken {
     const boy = c.id === 'family' && this.boyHears();
     const lines = c.id === 'family' ? (boy ? TX.forsaken.callBoy : TX.forsaken.calls.family) : TX.forsaken.calls[c.id];
     const side = (gh.x - g.pos.x) * g.stage.right.x + (gh.z - g.pos.z) * g.stage.right.z;
-    g.hud.whisper(lines[c.calls % lines.length], side > 0 ? 0.8 : 0.2);
+    g.hud.whisper(lines[c.calls % lines.length], side > 0 ? 0.8 : 0.2, `${gh.voice}-ghost`);
     g.sfx.whisper(Math.max(-1, Math.min(1, side / 5)), 0.2);
     g.sfx.voice(gh.voice);
     c.calls++;

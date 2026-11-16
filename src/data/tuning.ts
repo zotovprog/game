@@ -42,6 +42,16 @@ export const T = {
   // те, кого нет: глаза в темноте и идущий по краю света
   phantom: { maxEyes: 7, eyesPerDread: 3, eyesOut: 6, eyeSize: 0.14, eyeGlow: 0.72, eyeLife: [2.5, 7] as [number, number], eyeGap: [4, 13] as [number, number],
     walkSpeed: 1.15, walkTime: 5.5, walkGap: [22, 48] as [number, number] },
+  // голоса: сколько прямого звука, хвоста пещеры и повторного эха; скорость; двоение и глухота у мёртвых
+  voice: {
+    live: { dry: 1.25, rev: 0.7, echo: 0.3, rate: 1, double: false, lp: 0 },
+    narrator: { dry: 1.15, rev: 0.85, echo: 0.22, rate: 1, double: false, lp: 0 },
+    shade: { dry: 0.8, rev: 1.3, echo: 0.6, rate: 0.97, double: false, lp: 5200 },
+    ghost: { dry: 0.45, rev: 1.8, echo: 1.1, rate: 0.93, double: true, lp: 3400 },
+    dark: { dry: 0.4, rev: 1.9, echo: 1.15, rate: 0.9, double: true, lp: 3000 },
+  },
+  // акустика пещеры: длина хвоста, повторное эхо (задержка, сколько возвращается, насколько темнеет), доля эха у обычных звуков
+  cave: { tail: 4.4, echoTime: 0.31, echoBack: 0.38, echoTone: 2100, echoTime2: 0.47, sfxEcho: 0.32 },
   // брошенных забирает тьма: когда ты отошёл на столько метров и прошло столько секунд
   forsaken: { away: 17, wait: 9, near: 11, burn: 0.75, lure: 9, lurePace: 0.45 },
   // лампы прежних носителей на пирамидках: зажёг — горит всегда, пещера это помнит

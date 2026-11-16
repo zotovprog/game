@@ -282,6 +282,24 @@ export class Game {
     scene.add(this.dust.points);
     this.forsaken = new Forsaken(this);
     this.story = new Story(this);
+    // озвучка: кто это сказал → чей голос; где он стоит → с какой стороны слышно
+    const roles: Record<string, string> = {
+      '': 'narrator', [TX.efim.name]: 'efim', [TX.efim.realName]: 'efim', [TX.vera.name]: 'vera', [TX.vera.realName]: 'vera', [TX.mila.name]: 'mila', [TX.mila.realName]: 'mila',
+      [TX.family.name]: 'father', [TX.family.realName]: 'father', [TX.family.mother]: 'mother', [TX.family.boy]: 'boy', [TX.shade.name]: 'shade',
+    };
+    const ghosts = ['dark', 'efim-ghost', 'vera-ghost', 'mila-ghost', 'father-ghost', 'mother-ghost', 'boy-ghost', 'narrator'];
+    hud.onVoice = (kind, who, text) => {
+      if (kind === 'hint') return this.sfx.narrBacklog >= 2 ? 0 : this.sfx.say('narrator', text, 'narr');
+      if (kind === 'screen') return this.sfx.say('narrator', text, 'narr');
+      if (kind === 'whisper') {
+        const pan = who[0] === '<' ? -0.75 : 0.75, role = who.slice(1) || ghosts.find((r) => this.sfx.voiceLen(r, text) > 0);
+        return role ? this.sfx.say(role, text, 'free', pan) : 0;
+      }
+      const role = roles[who];
+      if (role === undefined) return 0;
+      if (kind === 'pre') { this.sfx.preload(role, text); return 0; }
+      return this.sfx.say(role, text, 'dialog', role === 'narrator' ? 0 : this.panOf(this.story.speakerOf(who)));
+    };
     this.story.applyTrace();
 
     stage.target.set(this.pos.x, 0, this.pos.z);
@@ -487,6 +505,12 @@ export class Game {
         W.t = (lo + this.rng() * (hi - lo)) * (1.15 - 0.4 * this.dread);
       }
     }
+  }
+  /** С какой стороны экрана стоит говорящий (для панорамы голоса). */
+  panOf(h: Human | null): number {
+    if (!h || h === this.hero) return 0;
+    const p = h.root.position;
+    return clamp(((p.x - this.pos.x) * this.stage.right.x + (p.z - this.pos.z) * this.stage.right.z) / 5, -0.8, 0.8);
   }
   private counts = new Map<string, number>();
   /** Сколько раз это уже случалось (для подсказок, которые со временем короче). */

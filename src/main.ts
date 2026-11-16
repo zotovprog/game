@@ -40,6 +40,7 @@ function boot(autostart: boolean): void {
     sc.clear();
   }
   ui.replaceChildren();
+  sfx.voiceStop();
   stage.pressure = 0; stage.chroma = 0; stage.shake = 0;
   const hud = new Hud(ui);
   const input = new Input(hud.area, hud.mark);

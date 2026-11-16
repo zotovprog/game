@@ -1,4 +1,8 @@
-// Весь звук синтезируется на лету (WebAudio): гул пещеры, шёпот, сердце, шаги, капли, огонь, удары.
+// Звук пещеры синтезируется на лету (WebAudio): гул, шёпот, сердце, шаги, капли, огонь, удары.
+// Голоса людей и рассказчика — записи (public/voice), пропущенные через ту же акустику пещеры.
+import { T } from '../data/tuning';
+import voiceMap from '../data/voice.json';
+
 export interface AudioState {
   pressure: number;      // 0..1 — насколько тьма сжала круг
   power: number;         // 0..1 — сила пламени
@@ -15,6 +19,17 @@ export interface AudioState {
 
 export type Voice = 'efim' | 'vera' | 'father' | 'mother' | 'mila' | 'boy' | 'shade';
 
+const VOX = voiceMap as unknown as { packs: string[]; lines: Record<string, [pack: number, offset: number, length: number, seconds: number]> };
+const enc = new TextEncoder();
+/** Ключ записи реплики: тот же, что считает tools/voice.mjs (FNV-1a по UTF-8 строки «роль|текст»). */
+export function voiceKey(role: string, text: string): string {
+  let h = 0x811c9dc5;
+  for (const b of enc.encode(`${role}|${text}`)) { h ^= b; h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, '0');
+}
+type VoxKind = keyof typeof T.voice;
+const voxKind = (role: string): VoxKind => (role === 'narrator' ? 'narrator' : role === 'dark' ? 'dark' : role.endsWith('-ghost') ? 'ghost' : role === 'shade' ? 'shade' : 'live');
+
 export class Sfx {
   private ctx: AudioContext | null = null;
   private master!: GainNode; private lp!: BiquadFilterNode; private rev!: GainNode;
@@ -26,6 +41,17 @@ export class Sfx {
   private roarG!: GainNode; private whineG!: GainNode;
   private tZone = 3; private tPulse = 0; private tSwell = 8; private tHush = 20; private hush = 0; private zoneNow = '';
   private stepFlip = false;
+  // записанные голоса
+  private echoIn!: GainNode;
+  private vox = new Map<string, AudioBuffer>();
+  private voxLoad = new Map<string, Promise<AudioBuffer | null>>();
+  private voxFail = 0;
+  private voxOff = location.protocol === 'file:' || !VOX.packs?.length;             // записи лежат рядом со страницей; без них — бормотание
+  private packs = new Map<number, Promise<ArrayBuffer>>();
+  private dialogStop: (() => void) | null = null; private dialogToken = 0;
+  private narrQ: string[] = []; private narrBusy = false; private narrStop: (() => void) | null = null;
+  /** сколько записанных реплик уже прозвучало (для проверок) */
+  played = 0;
 
   get ready(): boolean { return this.ctx !== null; }
   private get now(): number { return this.ctx!.currentTime; }
@@ -42,9 +68,18 @@ export class Sfx {
     this.lp = c.createBiquadFilter(); this.lp.type = 'lowpass'; this.lp.frequency.value = 18000;
     this.master = c.createGain(); this.master.gain.value = 0;
     this.master.connect(this.lp).connect(comp).connect(c.destination);
-    const conv = c.createConvolver(); conv.buffer = this.impulse(3.4);
+    const conv = c.createConvolver(); conv.buffer = this.impulse(T.cave.tail);
     this.rev = c.createGain(); this.rev.gain.value = 0.55;
     this.rev.connect(conv).connect(this.master);
+    // эхо пещеры: звук возвращается от дальних стен, каждый круг тише и глуше
+    const C = T.cave;
+    this.echoIn = c.createGain();
+    const d1 = c.createDelay(1.5); d1.delayTime.value = C.echoTime;
+    const tone = c.createBiquadFilter(); tone.type = 'lowpass'; tone.frequency.value = C.echoTone;
+    this.echoIn.connect(d1); d1.connect(tone); tone.connect(this.gain(C.echoBack, d1));
+    tone.connect(this.gain(0.6, this.master)); tone.connect(this.gain(0.6, this.rev));
+    const d2 = c.createDelay(1.5); d2.delayTime.value = C.echoTime2;
+    this.echoIn.connect(d2); d2.connect(this.gain(0.28, tone));
 
     // гул: два почти одинаковых тона дают медленное биение
     this.droneG = this.gain(0.0, this.master);
@@ -98,13 +133,18 @@ export class Sfx {
     return b;
   }
   private impulse(sec: number): AudioBuffer {
-    const c = this.ctx!, b = c.createBuffer(2, c.sampleRate * sec, c.sampleRate);
+    const c = this.ctx!, sr = c.sampleRate, b = c.createBuffer(2, sr * sec, sr);
     for (let ch = 0; ch < 2; ch++) {
       const d = b.getChannelData(ch); let lpv = 0;
       for (let i = 0; i < d.length; i++) {
         const t = i / d.length;
-        lpv += ((Math.random() * 2 - 1) - lpv) * (0.5 - 0.42 * t);            // хвост темнее начала
-        d[i] = lpv * Math.pow(1 - t, 2.6) * (i < 400 ? i / 400 : 1);
+        lpv += ((Math.random() * 2 - 1) - lpv) * (0.5 - 0.43 * t);            // хвост темнее начала
+        d[i] = lpv * Math.pow(1 - t, 2.3) * (i < 400 ? i / 400 : 1) * 0.8;
+      }
+      // ранние отражения от близких стен: несколько отчётливых повторов до общего хвоста (в каждом ухе — свои)
+      for (const [ms, a] of [[19, 0.55], [37, 0.46], [61, 0.36], [89, 0.3], [127, 0.22], [173, 0.16], [229, 0.11]]) {
+        const i0 = Math.floor(((ms + ch * 6.5) / 1000) * sr);
+        for (let i = 0; i < 110 && i0 + i < d.length; i++) d[i0 + i] += (Math.random() * 2 - 1) * a * (1 - i / 110);
       }
     }
     return b;
@@ -117,7 +157,7 @@ export class Sfx {
     f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
     const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + Math.min(0.02, dur * 0.2)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     const p = c.createStereoPanner(); p.pan.value = pan;
-    s.connect(f).connect(g).connect(p); p.connect(this.master); if (wet > 0) p.connect(this.gain(wet, this.rev));
+    s.connect(f).connect(g).connect(p); p.connect(this.master); if (wet > 0) { p.connect(this.gain(wet, this.rev)); p.connect(this.gain(wet * T.cave.sfxEcho, this.echoIn)); }
     s.start(t, Math.random() * buf.duration); s.stop(t + dur + 0.05);
   }
   private tone(type: OscillatorType, f0: number, f1: number, dur: number, vol: number, pan = 0, wet = 0.3, attack = 0.005): void {
@@ -126,7 +166,7 @@ export class Sfx {
     o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(10, f1), t + dur);
     const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     const p = c.createStereoPanner(); p.pan.value = pan;
-    o.connect(g).connect(p); p.connect(this.master); if (wet > 0) p.connect(this.gain(wet, this.rev));
+    o.connect(g).connect(p); p.connect(this.master); if (wet > 0) { p.connect(this.gain(wet, this.rev)); p.connect(this.gain(wet * T.cave.sfxEcho, this.echoIn)); }
     o.start(t); o.stop(t + dur + 0.05);
   }
 
@@ -263,9 +303,98 @@ export class Sfx {
     const n = 3 + Math.floor(Math.random() * 3);
     for (let i = 0; i < n; i++) setTimeout(() => this.ctx && this.burst(this.white, 'bandpass', 1500 + Math.random() * 1600, 1300 + Math.random() * 1200, 0.1 + Math.random() * 0.12, vol * (0.5 + Math.random() * 0.5), pan, 0.5, 4), i * 150);
   }
+  // ---------- записанные голоса
+  /** Записи есть и грузятся. */
+  get voiced(): boolean { return !this.voxOff; }
+  /** Длительность записи реплики в секундах; 0 — записи нет. */
+  voiceLen(role: string, text: string): number { return this.voxOff ? 0 : (VOX.lines[voiceKey(role, text)]?.[3] ?? 0) / T.voice[voxKind(role)].rate; }
+  /** Подгрузить реплику заранее, чтобы голос не отставал от текста. */
+  preload(role: string, text: string): void { const k = voiceKey(role, text); if (this.ctx && !this.voxOff && VOX.lines[k]) void this.loadVox(k); }
+  /** Пакет записей одной роли: качается один раз, реплики вырезаются из него. */
+  private pack(i: number): Promise<ArrayBuffer> {
+    let p = this.packs.get(i);
+    if (!p) {
+      p = fetch(new URL(`voice/${VOX.packs[i]}`, document.baseURI)).then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.arrayBuffer(); });
+      p.catch(() => this.packs.delete(i));
+      this.packs.set(i, p);
+    }
+    return p;
+  }
+  private loadVox(k: string): Promise<AudioBuffer | null> {
+    const have = this.vox.get(k);
+    if (have) return Promise.resolve(have);
+    let p = this.voxLoad.get(k);
+    if (!p) {
+      const [pi, off, len] = VOX.lines[k];
+      p = this.pack(pi)
+        .then((b) => this.ctx!.decodeAudioData(b.slice(off, off + len)))
+        .then((buf) => {
+          this.vox.set(k, buf); this.voxFail = 0;
+          if (this.vox.size > 40) this.vox.delete(this.vox.keys().next().value as string);
+          return buf as AudioBuffer | null;
+        })
+        .catch(() => { if (++this.voxFail >= 3) this.voxOff = true; return null; })
+        .finally(() => this.voxLoad.delete(k));
+      this.voxLoad.set(k, p);
+    }
+    return p;
+  }
+  /** Проиграть запись сквозь пещеру: прямой звук, хвост, повторное эхо; мёртвые двоятся и глуше. */
+  private playVox(buf: AudioBuffer, kind: VoxKind, pan: number, onEnd?: () => void): () => void {
+    const c = this.ctx!, fx = T.voice[kind];
+    const src = c.createBufferSource(); src.buffer = buf; src.playbackRate.value = fx.rate;
+    let node: AudioNode = src;
+    if (fx.lp) { const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = fx.lp; src.connect(f); node = f; }
+    const g = c.createGain(); node.connect(g);
+    const p = c.createStereoPanner(); p.pan.value = pan; g.connect(p);
+    p.connect(this.gain(fx.dry, this.master)); p.connect(this.gain(fx.rev, this.rev)); p.connect(this.gain(fx.echo, this.echoIn));
+    if (fx.double) {                                                    // второй такой же голос чуть позже и с другой стороны
+      const d = c.createDelay(0.5); d.delayTime.value = 0.085;
+      const p2 = c.createStereoPanner(); p2.pan.value = pan > 0 ? -0.7 : 0.7;
+      g.connect(d).connect(p2); p2.connect(this.gain(fx.dry * 0.6, this.master)); p2.connect(this.gain(fx.rev * 0.7, this.rev));
+    }
+    src.onended = () => onEnd?.();
+    src.start(); this.played++;
+    return () => { g.gain.setTargetAtTime(0, c.currentTime, 0.04); try { src.stop(c.currentTime + 0.25); } catch { /* уже кончилась */ } };
+  }
+  /**
+   * Сказать записанную реплику. Канал: dialog — одна реплика за раз (новая обрывает прежнюю);
+   * narr — рассказчик, по очереди; free — поверх всего (призраки, выкрики). Возвращает длительность или 0, если записи нет.
+   */
+  say(role: string, text: string, channel: 'dialog' | 'narr' | 'free' = 'dialog', pan = 0): number {
+    const k = voiceKey(role, text), len = this.ctx ? this.voiceLen(role, text) : 0;
+    if (!len) return 0;
+    const kind = voxKind(role);
+    if (channel === 'narr') {
+      if (!this.narrQ.includes(k)) this.narrQ.push(k);
+      this.pumpNarr();
+      return len;
+    }
+    const token = ++this.dialogToken;
+    if (channel === 'dialog') { this.dialogStop?.(); this.dialogStop = null; }
+    void this.loadVox(k).then((buf) => {
+      if (!buf || !this.ctx || (channel === 'dialog' && token !== this.dialogToken)) return;
+      const stop = this.playVox(buf, kind, pan);
+      if (channel === 'dialog') this.dialogStop = stop;
+    });
+    return len;
+  }
+  private pumpNarr(): void {
+    if (this.narrBusy) return;
+    const k = this.narrQ.shift();
+    if (!k) return;
+    this.narrBusy = true;
+    const next = () => { this.narrBusy = false; this.narrStop = null; this.pumpNarr(); };
+    void this.loadVox(k).then((buf) => { if (!buf || !this.ctx) { next(); return; } this.narrStop = this.playVox(buf, 'narrator', 0, next); });
+  }
+  /** Рассказчик занят или ждёт очереди — подсказку можно не начинать. */
+  get narrBacklog(): number { return this.narrQ.length + (this.narrBusy ? 1 : 0); }
+  /** Оборвать все голоса (новая попытка, гибель). */
+  voiceStop(): void { this.narrQ.length = 0; this.narrStop?.(); this.dialogStop?.(); this.dialogToken++; }
+
   /** Голос человека: бормотание из нескольких слогов; у детей — выше и короче. */
   voice(kind: Voice): void {
-    if (!this.ctx) return;
+    if (!this.ctx || this.voiced) return;
     const base = { efim: 98, vera: 196, father: 110, mother: 208, mila: 330, boy: 300, shade: 350 }[kind];
     const form = { efim: 520, vera: 760, father: 560, mother: 800, mila: 1050, boy: 980, shade: 1150 }[kind];
     const n = 3 + Math.floor(Math.random() * 3);

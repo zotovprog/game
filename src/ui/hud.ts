@@ -94,6 +94,9 @@ export class Hud {
     this.speak.classList.toggle('on', x !== null);
     if (x !== null) this.speak.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%)`;
   }
+  /** Озвучка: игра возвращает длительность записи в секундах (0 — голоса нет). kind: line — реплика, pre — скоро понадобится, hint, whisper, screen. */
+  onVoice: (kind: 'line' | 'pre' | 'hint' | 'whisper' | 'screen', who: string, text: string) => number = () => 0;
+  private lastLine = '';
   get speakerName(): string { return this.busy ? this.who.textContent ?? '' : ''; }
   /** Открыт ли диалог или выбор. */
   get busy(): boolean { return this.onDone !== null || this.onChoice !== null; }
@@ -161,7 +164,7 @@ export class Hud {
   hint(text: string, secs = 6): void {
     this.hintEl.textContent = text;
     this.hintEl.classList.remove('hidden');
-    this.hintTimer = secs;
+    this.hintTimer = Math.max(secs, this.onVoice('hint', '', text) + 0.6);
   }
   /** Кнопка действия: видна, пока действие доступно. */
   prompt(text: string | null): void {
@@ -175,6 +178,7 @@ export class Hud {
     this.queue = lines.slice();
     this.onDone = done;
     this.who.textContent = name;
+    for (const l of lines.slice(1)) this.onVoice('pre', name, l);
     this.dialog.classList.toggle('centered', centered);
     this.nextBtn.style.display = '';
     this.opts.replaceChildren();
@@ -192,12 +196,16 @@ export class Hud {
     this.txt.textContent = line;
     this.txt.classList.remove('in'); void this.txt.offsetWidth; this.txt.classList.add('in');
     this.lineT = Math.min(6.5, Math.max(2.3, 1.3 + line.length * 0.055));
+    this.lastLine = line;
+    const spoken = this.onVoice('line', this.who.textContent ?? '', line);
+    if (spoken) this.lineT = Math.max(this.lineT, spoken + 0.7);         // реплика не уходит, пока не отзвучала
     this.shownAt = performance.now();
   }
 
   choose(name: string, text: string, choices: Choice[], cb: (i: number) => void): void {
     this.who.textContent = name;
     this.txt.textContent = text;
+    if (text && text !== this.lastLine) this.onVoice('line', name, text);          // вопрос, который только что прозвучал, не повторяем
     this.dialog.classList.remove('centered');
     this.nextBtn.style.display = 'none';
     this.opts.replaceChildren();
@@ -220,9 +228,11 @@ export class Hud {
     cb?.(i);
   }
 
-  whisper(text: string, sideX = Math.random()): void {
+  /** who — чей это голос (роль записи); пусто — тьма или тот, чья это фраза. */
+  whisper(text: string, sideX = Math.random(), who = ''): void {
     const w = el('div', '', 'whisper');
     w.textContent = text;
+    this.onVoice('whisper', sideX < 0.5 ? `<${who}` : `>${who}`, text);
     const left = sideX < 0.5 ? 6 + Math.random() * 22 : 58 + Math.random() * 20;
     w.style.left = `${left}%`; w.style.top = `${30 + Math.random() * 40}%`;
     this.root.append(w);
@@ -245,8 +255,8 @@ export class Hud {
     const ps: HTMLElement[] = [];
     if (opts.title) { const h = el('h1'); h.textContent = opts.title; o.append(h); }
     if (opts.sub !== undefined) { const h = el('h2'); h.textContent = opts.sub; o.append(h); }
-    for (const l of opts.lines ?? []) { const p = el('p'); p.textContent = l; o.append(p); ps.push(p); }
-    if (opts.mem) { const p = el('p', '', 'mem'); p.textContent = opts.mem; o.append(p); ps.push(p); }
+    for (const l of opts.lines ?? []) { const p = el('p'); p.textContent = l; o.append(p); ps.push(p); this.onVoice('screen', '', l); }
+    if (opts.mem) { const p = el('p', '', 'mem'); p.textContent = opts.mem; o.append(p); ps.push(p); this.onVoice('screen', '', opts.mem); }
     let btn: HTMLElement | null = null;
     if (opts.button) {
       btn = el('button'); btn.textContent = opts.button;
