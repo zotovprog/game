@@ -24,7 +24,7 @@ describe.each([['глубина 1', DEPTH1]])('%s', (_n, def) => {
   const { grid, seen } = reach(def);
   const ok = (p: [number, number], clear = 0.5) => { const [x, z] = grid.snap(p[0], p[1], clear); return seen[Math.floor(z) * def.w + Math.floor(x)] === 1; };
   it('всё достижимо от старта', () => {
-    const pts: [number, number][] = [def.start.lamp, def.start.dead, ...def.flasks, ...def.braziers, ...def.wisps.map((w) => w.at), def.efim.at, def.vera.at, def.gate.bowl, ...def.vera.path, ...def.zones.map((z) => z.at), def.mila.at, def.family.fire, def.shade.at, def.toy.at, def.cart, ...def.holes, ...def.cairns, ...def.lures,
+    const pts: [number, number][] = [def.start.lamp, def.start.dead, ...def.flasks, ...def.braziers, ...def.wisps.map((w) => w.at), def.efim.at, def.vera.at, def.gate.bowl, ...def.vera.path, ...def.zones.map((z) => z.at), def.mila.at, def.family.fire, def.shade.at, def.toy.at, ...def.holes, ...def.cairns, ...def.lures,
       ...def.bowls.flatMap((b) => b.bowls), ...def.shadows.map((sh) => sh.statue), ...def.tights.flatMap((t) => t.pts), ...def.rooms.filter((r) => !r.ragged).map((r): [number, number] => [(r.rect[0] + r.rect[2]) / 2, (r.rect[1] + r.rect[3]) / 2])];;
     for (const p of pts) expect(ok(p), `точка ${p}`).toBe(true);
   });

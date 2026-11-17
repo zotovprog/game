@@ -13,7 +13,7 @@ export interface TexSet { c: Texture; n: Texture }
 const TEX = ['cliff_side', 'rock_face_03', 'brown_mud_rocks_01', 'wood_planks_dirt', 'old_linoleum_flooring_01', 'decrepit_wallpaper', 'peeling_painted_wall', 'worn_planks', 'rock_wall_10'] as const;
 const MODELS = [
   'namaqualand_boulder_02', 'namaqualand_boulder_03', 'namaqualand_boulder_05', 'namaqualand_boulder_06',
-  'wooden_crate_01', 'wooden_crate_02', 'wine_barrel_01', 'wooden_ladder', 'picke_dirty_01', 'wooden_bucket_01',
+  'wooden_bucket_01',
   'WoodenTable_01', 'painted_wooden_chair_01', 'painted_wooden_cabinet', 'vintage_grandfather_clock_01', 'scandinavian_masonry_heater',
   'hanging_picture_frame_01', 'pot_enamel_01', 'vintage_crutches_01', 'vintage_oil_lamp', 'gothic_statue',
 ] as const;

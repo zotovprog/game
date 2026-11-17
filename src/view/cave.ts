@@ -247,7 +247,7 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
     list.push({ m: new Matrix4().compose(p.set(x, y, z), q, s.set(k, k * tall, k)), c });
   };
   const keep: [number, number][] = [def.start.hero, def.start.lamp, def.start.dead, ...def.flasks, ...def.braziers, ...def.wisps.map((w) => w.at),
-    def.efim.at, def.efim.fire, def.vera.at, ...def.vera.path, def.mila.at, def.family.fire, def.shade.at, def.toy.at, def.gate.bowl, def.cart, ...def.rails.flat()];
+    def.efim.at, def.efim.fire, def.vera.at, ...def.vera.path, def.mila.at, def.family.fire, def.shade.at, def.toy.at, def.gate.bowl];
   const clear = (x: number, z: number, r: number) => !reserved(x, z) && keep.every((k) => Math.hypot(k[0] - x, k[1] - z) > r);
   const SPIKE: Record<Kind, number> = { rubble: 0.07, mine: 0.02, columns: 0.2, water: 0.16, void: 0.03, fissure: 0.16, gate: 0.02, room: 0 };
   const BOULDER: Record<Kind, number> = { rubble: 0.1, mine: 0.04, columns: 0.05, water: 0.07, void: 0.1, fissure: 0.05, gate: 0.03, room: 0 };
@@ -312,47 +312,40 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
     cairns.push({ x, y: y + 0.1, z });
     grid.obstacles.push({ x, z, r: 0.4 });
   }
-  // выработка: ящики, бочки, брошенные доски
-  const crateGeo = new BoxGeometry(1, 1, 1), barrelGeo = new CylinderGeometry(0.5, 0.44, 1, 9), plankGeo = new BoxGeometry(1.5, 0.05, 0.2);
-  trash.push(crateGeo, barrelGeo, plankGeo);
-  const crates: Inst[] = [], barrels: Inst[] = [], planks: Inst[] = [], rubble: Inst[] = [];
-  const wood = () => new Color(1, 1, 1).multiplyScalar(0.7 + rng() * 0.5);
+  // вещи из чужих жизней: вросли в камень у стен, а некоторые висят в воздухе — здесь всё не так, как наверху
+  const rubble: Inst[] = [];
+  const pale = () => new Color(1, 1, 1).multiplyScalar(0.7 + rng() * 0.45);
+  const THINGS: [ModelId, number, number][] = [                 // модель, высота (м), радиус препятствия
+    ['painted_wooden_chair_01', 0.92, 0.3], ['painted_wooden_chair_01', 0.92, 0.3], ['painted_wooden_cabinet', 1.1, 0.6], ['vintage_grandfather_clock_01', 2.1, 0.42],
+    ['WoodenTable_01', 0.78, 0.7], ['hanging_picture_frame_01', 0.7, 0], ['vintage_oil_lamp', 0.45, 0], ['pot_enamel_01', 0.2, 0], ['wooden_bucket_01', 0.5, 0], ['vintage_crutches_01', 1.35, 0],
+  ];
+  const THING: Record<Kind, number> = { mine: 0.085, rubble: 0.04, columns: 0.022, void: 0.04, fissure: 0.022, water: 0.012, gate: 0, room: 0 };
+  const ADRIFT: Record<Kind, number> = { mine: 0.006, rubble: 0.004, columns: 0.003, void: 0.007, fissure: 0, water: 0.003, gate: 0, room: 0 };       // висят посреди пустоты, вдали от стен
+  /** Поставить вещь: h — её высота в метрах; tx, tz — наклон. */
+  const thing = (id: ModelId, x: number, y: number, z: number, h: number, ry: number, tx: number, tz: number) => {
+    const m = ART.models[id];
+    if (!m) return;
+    const k = h / m.size.y;
+    e.set(tx, ry, tz); q.setFromEuler(e);
+    let list = modelInst.get(m);
+    if (!list) modelInst.set(m, (list = []));
+    list.push({ m: new Matrix4().compose(p.set(x, y, z), q, s.set(k, k, k)), c: pale() });
+  };
   for (let j = 0; j < grid.h; j++) for (let i = 0; i < grid.w; i++) {
     if (!grid.floorCell(i, j)) continue;
     const kind = grid.kindAt(i, j), x = i + 0.5 + (rng() - 0.5) * 0.4, z = j + 0.5 + (rng() - 0.5) * 0.4;
     const wd = grid.wallDist(x, z);
-    if (kind === 'mine' && wd < 1.4 && wd > 0.5 && clear(x, z, 1.6)) {
-      const roll = rng();
-      if (roll < 0.05) {
-        const k = 0.42 + rng() * 0.3;
-        e.set(0, rng() * 6.28, 0); q.setFromEuler(e);
-        const crate = ART.models[rng() < 0.5 ? 'wooden_crate_01' : 'wooden_crate_02'];
-        if (crate) place(crate, x, 0, z, rng() * 6.28, k * 0.8, 1, wood());
-        else {
-          crates.push({ m: new Matrix4().compose(p.set(x, k / 2, z), q, s.set(k, k, k)), c: wood() });
-          if (rng() < 0.35) crates.push({ m: new Matrix4().compose(p.set(x + 0.1, k + k * 0.35, z - 0.05), q, s.set(k * 0.7, k * 0.7, k * 0.7)), c: wood() });
-        }
-        grid.obstacles.push({ x, z, r: k * 0.62 });
-      } else if (roll < 0.075) {
-        const k = 0.5 + rng() * 0.2, tip = rng() < 0.3;
-        e.set(tip ? Math.PI / 2 : 0, rng() * 6.28, 0); q.setFromEuler(e);
-        const barrel = ART.models.wine_barrel_01;
-        if (barrel && !tip) place(barrel, x, 0, z, rng() * 6.28, k * 0.55, 1, wood());
-        else barrels.push({ m: new Matrix4().compose(p.set(x, tip ? k * 0.5 : k * 0.55, z), q, s.set(k, k * 1.1, k)), c: wood() });
-        grid.obstacles.push({ x, z, r: k * 0.55 });
+    if (wd < 1.5 && wd > 0.5 && rng() < THING[kind] && clear(x, z, 1.7)) {
+      const [id, h, r] = THINGS[Math.floor(rng() * THINGS.length)], roll = rng();
+      if (roll < 0.3) thing(id, x, 0.3 + rng() * 0.45, z, h, rng() * 6.28, (rng() - 0.5) * 2.6, (rng() - 0.5) * 2.6);              // висит в воздухе, как попало
+      else {
+        const sunk = roll < 0.8;                                                                                                // вросла в камень, накренилась
+        thing(id, x, sunk ? -h * (0.12 + rng() * 0.3) : 0, z, h, rng() * 6.28, sunk ? (rng() - 0.5) * 0.7 : 0, sunk ? (rng() - 0.5) * 0.7 : 0);
+        if (r) grid.obstacles.push({ x, z, r });
       }
-    }
-    if (kind === 'mine' && wd < 1.1 && wd > 0.55 && clear(x, z, 1.4)) {
-      const roll = rng(), tool = roll < 0.012 ? ART.models.wooden_ladder : roll < 0.024 ? ART.models.picke_dirty_01 : roll < 0.04 ? ART.models.wooden_bucket_01 : undefined;
-      if (tool) {
-        const small = tool === ART.models.wooden_bucket_01;
-        place(tool, x, 0, z, rng() * 6.28, small ? 0.2 : 0.48, 1, wood());
-        if (!small) grid.obstacles.push({ x, z, r: 0.3 });
-      }
-    }
-    if (kind === 'mine' && rng() < 0.03 && !reserved(x, z)) {
-      e.set(0, rng() * 6.28, (rng() - 0.5) * 0.1); q.setFromEuler(e);
-      planks.push({ m: new Matrix4().compose(p.set(x, 0.05, z), q, s.set(0.6 + rng() * 0.6, 1, 1)), c: wood() });
+    } else if (wd >= 2.2 && rng() < ADRIFT[kind] && clear(x, z, 2.2)) {
+      const [id, h] = THINGS[Math.floor(rng() * 5)];
+      thing(id, x, 0.3 + rng() * 0.45, z, h, rng() * 6.28, (rng() - 0.5) * 3, (rng() - 0.5) * 3);
     }
     // россыпь щебня: несколько камней кучкой
     if (rng() < (kind === 'rubble' || kind === 'void' ? 0.045 : 0.02) && !reserved(x, z)) {
@@ -365,17 +358,19 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
     }
   }
 
-  // завал над лазом: сломанная крепь поперёк и глыбы по краям — ползёшь под ними
+  // завал над лазом: чужая мебель, набитая в щель между камнями, — ползёшь под ней
   for (const t of crawls) for (let k = 0; k < t.pts.length - 1; k++) {
     const [ax, az] = t.pts[k], [bx, bz] = t.pts[k + 1];
     const len = Math.hypot(bx - ax, bz - az), ux = (bx - ax) / len, uz = (bz - az) / len, ry = Math.atan2(-uz, ux) + Math.PI / 2;
-    for (let d = 0.5; d < len; d += 0.8) {
-      const x = ax + ux * d, z = az + uz * d;
-      e.set((rng() - 0.5) * 0.25, ry + (rng() - 0.5) * 0.7, (rng() - 0.5) * 0.3); q.setFromEuler(e);
-      planks.push({ m: new Matrix4().compose(p.set(x + (rng() - 0.5) * 0.3, 1.02 + rng() * 0.22, z + (rng() - 0.5) * 0.3), q, s.set(1.5 + rng() * 0.5, 2.2, 1.3)), c: wood() });
-      for (const side of [-1, 1]) if (boulderModels.length && rng() < 0.75) {
-        const off = 1.25 + rng() * 0.7, r = 0.5 + rng() * 0.55;
-        place(boulderModels[Math.floor(rng() * boulderModels.length)], x - uz * off * side, 0.5 + rng() * 0.5, z + ux * off * side, rng() * 6.28, r, 0.9 + rng() * 0.4, new Color(1, 1, 1).multiplyScalar(0.75 + rng() * 0.4), 0.5);
+    let n = 0;
+    for (let d = 0.6; d < len; d += 0.85, n++) {
+      const x = ax + ux * d + (rng() - 0.5) * 0.3, z = az + uz * d + (rng() - 0.5) * 0.3;
+      if (n % 2 === 0) thing('WoodenTable_01', x, 1.0 + rng() * 0.25, z, 0.78, ry + (rng() - 0.5) * 0.5, (rng() - 0.5) * 0.5, (rng() - 0.5) * 0.4);
+      else thing(rng() < 0.5 ? 'painted_wooden_cabinet' : 'painted_wooden_chair_01', x, 1.15 + rng() * 0.3, z, 1.0, rng() * 6.28, (rng() - 0.5) * 2.4, (rng() - 0.5) * 2.4);
+      for (const side of [-1, 1]) if (rng() < 0.6) {
+        const off = 1.3 + rng() * 0.6;
+        if (rng() < 0.5 && boulderModels.length) place(boulderModels[Math.floor(rng() * boulderModels.length)], x - uz * off * side, 0.45 + rng() * 0.4, z + ux * off * side, rng() * 6.28, 0.5 + rng() * 0.5, 0.9 + rng() * 0.4, new Color(1, 1, 1).multiplyScalar(0.75 + rng() * 0.4), 0.5);
+        else thing(rng() < 0.5 ? 'painted_wooden_chair_01' : 'vintage_grandfather_clock_01', x - uz * off * side, 0.5 + rng() * 0.5, z + ux * off * side, rng() < 0.5 ? 0.92 : 2.1, rng() * 6.28, (rng() - 0.5) * 2.2, (rng() - 0.5) * 2.2);
       }
     }
   }
@@ -406,56 +401,34 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
   add(boulderGeo, rockMat, boulders); add(spikeGeo, rockMat, spikes); add(colGeo, rockMat, columns);
   add(pebbleGeo, rockMat, pebbles); add(boneGeo, boneMat, bones, false);
   add(pebbleGeo, rockMat, rubble); add(lampGeo, ironMat, deadLamps, false);
-  add(crateGeo, woodMat, crates); add(barrelGeo, woodMat, barrels); add(plankGeo, woodMat, planks, false);
 
-  // ---------- старая выработка: крепь, рельсы, вагонетка
-  const mk = (geo: BufferGeometry, mat: MeshStandardMaterial, x: number, y: number, z: number, ry = 0, shadow = true) => {
-    const m = new Mesh(geo, mat);
-    m.position.set(x, y, z); m.rotation.y = ry;
-    m.castShadow = shadow; m.receiveShadow = true;
-    group.add(m); trash.push(geo);
-    return m;
-  };
+  // ---------- дверные коробки без стен: стоят поперёк ходов, и сквозь них приходится идти
+  const postGeo = new BoxGeometry(0.11, 2.12, 0.16), lintelGeo = new BoxGeometry(1.34, 0.11, 0.16), leafGeo = new BoxGeometry(1.06, 2.02, 0.055);
+  trash.push(postGeo, lintelGeo, leafGeo);
+  const posts: Inst[] = [], lintels: Inst[] = [], leaves: Inst[] = [];
   for (const cv of def.carves) {
-    if (cv.kind !== 'mine' || cv.r > 2.6 || cv.r < 1.5 || cv.pts.length < 2) continue;      // в лазах и дверных ходах крепи нет
+    if (cv.rect || cv.r > 2.6 || cv.r < 1.5 || cv.pts.length < 2 || cv.kind === 'water' || cv.kind === 'gate') continue;      // в лазах, комнатах и воде их нет
     for (let k = 0; k < cv.pts.length - 1; k++) {
       const [ax, az] = cv.pts[k], [bx, bz] = cv.pts[k + 1];
       const len = Math.hypot(bx - ax, bz - az), ux = (bx - ax) / len, uz = (bz - az) / len;
-      for (let t = 2.5; t < len - 1.5; t += 5.5) {
-        const mx = ax + ux * t, mz = az + uz * t, half = cv.r - 0.75, ry = Math.atan2(-uz, ux) + Math.PI / 2;
-        const ends: [number, number][] = [[mx - uz * half, mz + ux * half], [mx + uz * half, mz - ux * half]];
-        if (!ends.every(([x, z]) => grid.isFloor(x, z))) continue;
-        for (const [x, z] of ends) {
-          mk(new CylinderGeometry(0.085, 0.11, 2.45, 6), woodMat, x, 1.2, z).rotation.z = (rng() - 0.5) * 0.08;
-          grid.obstacles.push({ x, z, r: 0.15 });
+      for (let t = 3.5 + rng() * 3; t < len - 2.5; t += cv.kind === 'mine' ? 7 : 12 + rng() * 6) {
+        const side = (rng() - 0.5) * 0.9, mx = ax + ux * t - uz * side, mz = az + uz * t + ux * side;
+        const ry = Math.atan2(-uz, ux) + Math.PI / 2 + (rng() - 0.5) * 0.35, cx = Math.cos(ry), sz = -Math.sin(ry);       // вдоль коробки
+        const ends: [number, number][] = [[mx - cx * 0.6, mz - sz * 0.6], [mx + cx * 0.6, mz + sz * 0.6]];
+        if (!ends.every(([x, z]) => grid.isFloor(x, z) && grid.wallDist(x, z) > 0.45) || reserved(mx, mz) || !keep.every((kp) => Math.hypot(kp[0] - mx, kp[1] - mz) > 2.4)) continue;
+        const lean = (rng() - 0.5) * 0.12;
+        e.set(lean, ry, 0); q.setFromEuler(e);
+        for (const [x, z] of ends) { posts.push({ m: new Matrix4().compose(p.set(x, 1.06, z), q, s.set(1, 1, 1)), c: pale() }); grid.obstacles.push({ x, z, r: 0.13 }); }
+        lintels.push({ m: new Matrix4().compose(p.set(mx, 2.14, mz), q, s.set(1, 1, 1)), c: pale() });
+        if (rng() < 0.6) {                                              // дверь в никуда: створка приоткрыта
+          const ajar = ry + (rng() < 0.5 ? 1 : -1) * (0.5 + rng() * 1.0), [hx, hz] = ends[0];
+          e.set(0, ajar, 0); q.setFromEuler(e);
+          leaves.push({ m: new Matrix4().compose(p.set(hx + Math.cos(ajar) * 0.55, 1.03, hz - Math.sin(ajar) * 0.55), q, s.set(1, 1, 1)), c: pale() });
         }
-        mk(new BoxGeometry(half * 2 + 0.5, 0.16, 0.2), woodMat, mx, 2.45, mz, ry).rotation.z = (rng() - 0.5) * 0.05;
       }
     }
   }
-  const sleepers: Inst[] = [];
-  for (const line of def.rails) for (let k = 0; k < line.length - 1; k++) {
-    const [ax, az] = line[k], [bx, bz] = line[k + 1];
-    const len = Math.hypot(bx - ax, bz - az), ux = (bx - ax) / len, uz = (bz - az) / len, ry = Math.atan2(-uz, ux);
-    for (const side of [-0.36, 0.36]) mk(new BoxGeometry(len + 0.1, 0.07, 0.05), ironMat, (ax + bx) / 2 - uz * side, 0.1, (az + bz) / 2 + ux * side, ry, false);
-    for (let t = 0.3; t < len; t += 0.85) {
-      e.set(0, ry + (rng() - 0.5) * 0.12, 0); q.setFromEuler(e);
-      sleepers.push({ m: new Matrix4().compose(p.set(ax + ux * t, 0.04, az + uz * t), q, s.set(1, 1, 1)), c: new Color(1, 1, 1) });
-    }
-  }
-  const sleeperGeo = new BoxGeometry(0.17, 0.06, 1.15);
-  trash.push(sleeperGeo);
-  add(sleeperGeo, woodMat, sleepers, false);
-  { // вагонетка, съехавшая с рельсов
-    const [x, z] = grid.snap(def.cart[0], def.cart[1], 1);
-    const body = mk(new BoxGeometry(1.5, 0.75, 0.95), ironMat, x, 0.62, z, 0.5);
-    body.rotation.z = 0.16;
-    for (const [dx, dz] of [[-0.5, -0.4], [0.5, -0.4], [-0.5, 0.4], [0.5, 0.4]]) {
-      const w = mk(new CylinderGeometry(0.2, 0.2, 0.08, 10), ironMat, x + dx * Math.cos(0.5) + dz * Math.sin(0.5), 0.2, z - dx * Math.sin(0.5) + dz * Math.cos(0.5), 0.5);
-      w.rotation.x = Math.PI / 2;
-    }
-    grid.obstacles.push({ x, z, r: 0.85 });
-  }
+  add(postGeo, woodMat, posts); add(lintelGeo, woodMat, lintels); add(leafGeo, woodMat, leaves);
 
   // ---------- чёрная вода в затопленных ходах
   let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;

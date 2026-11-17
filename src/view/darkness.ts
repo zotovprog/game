@@ -99,6 +99,8 @@ vec3 darkApply(vec3 col, vec3 p){
   #ifndef DARK_TALL
   lit *= 1.0 - smoothstep(uHeight.x, uHeight.y, p.y);
   #endif
+  // у самой кромки света всё стынет в холодный, нездешний тон — и только потом уходит в чёрное
+  col = mix(col, col * vec3(0.5, 0.74, 1.5), smoothstep(0.42, 0.96, edge) * 0.9);
   return col * lit * dkRim;
 }
 `;

@@ -272,7 +272,7 @@ export function buildHalls(grid: Grid, style: Style, def: LevelDef): HallView {
       k.strokeRect(372, 34, 96, 150);                                                                                               // дверь
       k.globalAlpha = 0.5; k.beginPath(); k.moveTo(240, 172); k.lineTo(372, 184); k.lineTo(372, 60); k.lineTo(240, 100); k.closePath(); k.fill();   // тень
       k.globalAlpha = 0.9; drawGlyph(k, 4, 420, 104, 30);
-    });
+    }, '#1b1512');
   }
 
   return { group, doors, bowls, blockers, dispose() { trash.forEach((d) => d.dispose()); } };
