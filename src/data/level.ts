@@ -100,8 +100,6 @@ export const DEPTH1: LevelDef = {
   rails: [[[168, 187.5], [160, 182.6], [148, 178.4], [140, 174.4], [133, 173]]],
   cart: [162.5, 180.5],
   zones: [
-    { id: 'firstDark', at: [172, 192], r: 3.5 },
-    { id: 'draft', at: [161, 182.5], r: 4 },
     { id: 'seeWisp', at: [126, 139], r: 4.5 },
     { id: 'peek', at: [115, 145], r: 3.5 },
     { id: 'water', at: [112, 181], r: 5 },

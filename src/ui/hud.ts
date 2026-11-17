@@ -86,6 +86,8 @@ export class Hud {
   /** Озвучка: игра возвращает длительность записи в секундах (0 — голоса нет). kind: line — реплика, pre — скоро понадобится, hint, whisper, screen. */
   onVoice: (kind: 'line' | 'pre' | 'hint' | 'whisper' | 'screen' | 'end', who: string, text: string) => number = () => 0;
   private lastLine = '';
+  /** Журнал темпа: что показано игроку (подсказка, реплика, шёпот). */
+  onEvent: (kind: 'hint' | 'say' | 'whisper', text: string) => void = () => {};
   /** Голос реплики ещё грузится или звучит — текст его ждёт. */
   voiceHold: () => boolean = () => false;
   get speakerName(): string { return this.busy ? this.who.textContent ?? '' : ''; }
@@ -164,6 +166,7 @@ export class Hud {
     this.oil.classList.toggle('low', low);
   }
   hint(text: string, secs = 6): void {
+    this.onEvent('hint', text);
     this.hintEl.textContent = text;
     this.hintEl.classList.remove('hidden');
     this.hintTimer = Math.max(secs, this.onVoice('hint', '', text) + 0.6);
@@ -200,6 +203,7 @@ export class Hud {
     this.txt.classList.remove('in'); void this.txt.offsetWidth; this.txt.classList.add('in');
     this.lineT = Math.min(6.5, Math.max(2.3, 1.3 + line.length * 0.055));
     this.lastLine = line;
+    this.onEvent('say', `${this.who.textContent ?? ''}: ${line}`);
     const spoken = this.onVoice('line', this.who.textContent ?? '', line);
     if (spoken) this.lineT = Math.max(this.lineT, spoken + 0.7);         // реплика не уходит, пока не отзвучала
     this.shownAt = performance.now();
@@ -236,6 +240,7 @@ export class Hud {
   whisper(text: string, sideX = Math.random(), who = ''): void {
     const w = el('div', '', 'whisper');
     w.textContent = text;
+    this.onEvent('whisper', text);
     this.onVoice('whisper', sideX < 0.5 ? `<${who}` : `>${who}`, text);
     const left = sideX < 0.5 ? 6 + Math.random() * 22 : 58 + Math.random() * 20;
     w.style.left = `${left}%`; w.style.top = `${30 + Math.random() * 40}%`;

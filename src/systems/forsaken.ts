@@ -47,7 +47,7 @@ export class Forsaken {
         // уходишь — и видно, что без тебя здесь не выживут
         if (!c.warned && d > 6.5) { c.warned = true; g.hud.hint(TX.forsaken.warn[c.id], 6); }
         c.alone = d > F.away ? c.alone + dt : Math.max(0, c.alone - dt);
-        if (c.alone >= F.wait) this.take(c);
+        if (c.alone >= F.wait && g.pace.calm) this.take(c);          // крик — отдельное событие: не поверх другого
         continue;
       }
       // вернулся: тени проступают, поворачиваются к тебе и зовут; свет лампы их выжигает
@@ -152,6 +152,7 @@ export class Forsaken {
     });
     g.flags.add(`${c.id}Taken`);
     if (silent) return;
+    g.ev('scream', c.id); g.pace.hush(T.pace.gap.scream, g.dread);
     // крик издалека, с той стороны
     const side = (c.x - g.pos.x) * g.stage.right.x + (c.z - g.pos.z) * g.stage.right.z;
     const pan = Math.max(-0.9, Math.min(0.9, side / 12));

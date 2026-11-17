@@ -18,6 +18,8 @@ export interface PhantomWorld {
   active: boolean;              // тьма уже «проснулась», идёт игра
   lights: { x: number; z: number; r: number }[];     // все круги света (лампа, огни)
   rx: number; rz: number;       // «вправо» на экране в плоскости пола
+  eyesCap: number;              // темп: сколько пар глаз сейчас позволено (пока лампа горит)
+  walker: boolean;              // темп: идущему можно появиться
 }
 
 interface Eyes { g: Group; a: Sprite; b: Sprite; x: number; z: number; h: number; open: number; age: number; life: number; cool: number; on: boolean; blink: number; seed: number; gap: number }
@@ -30,6 +32,8 @@ export class Phantoms {
   private flat: MeshBasicMaterial; private walkEyes: Eyes | null = null; private mist: Sprite;
   /** шаг того, кого нет: панорама −1..1 */
   onStep: (pan: number) => void = () => {};
+  /** идущий появился */
+  onAppear: () => void = () => {};
   /** посветил на фигуру — она исчезла */
   onVanish: () => void = () => {};
   /** сколько пар глаз сейчас открыто (для проверок) */
@@ -94,7 +98,7 @@ export class Phantoms {
   update(dt: number, t: number, w: PhantomWorld): void {
     const P = T.phantom;
     this.surgeT = Math.max(0, this.surgeT - dt);
-    const want = !w.active ? 0 : this.surgeT > 0 ? P.maxEyes : Math.min(P.maxEyes, (w.lit ? 1 + Math.round(w.dread * P.eyesPerDread) : P.eyesOut));
+    const want = !w.active ? 0 : this.surgeT > 0 ? P.maxEyes : Math.min(P.maxEyes, (w.lit ? Math.min(w.eyesCap, 1 + Math.round(w.dread * P.eyesPerDread)) : P.eyesOut));
     this.openEyes = 0;
     this.eyes.forEach((e, i) => {
       if (!e.on) {
@@ -134,7 +138,7 @@ export class Phantoms {
     // тот, кто идёт по кромке света: чёрный на освещённом полу, а шагнув в темноту — одни глаза
     const W = this.walk, h = this.walker;
     if (!W.on) {
-      if (!w.active || !w.lit || w.radius < 3.6) return;
+      if (!w.active || !w.lit || !w.walker || w.radius < 3.6) return;
       if ((W.cool -= dt) > 0) return;
       const ang = this.rng() * 6.283, side = this.rng() < 0.5 ? -1 : 1;
       const ox = Math.cos(ang), oz = Math.sin(ang), d0 = w.radius * P.walkFrom;
@@ -147,6 +151,7 @@ export class Phantoms {
       if (!ok) { W.cool = 1.2; return; }
       Object.assign(W, { on: true, t: 0, x: sx, z: sz, dx, dz, step: 0.2, k: 0, leaving: false });
       h.root.visible = true;
+      this.onAppear();
       this.walkEyes ??= this.mkEyes();
       Object.assign(this.walkEyes, { h: 1.62, open: 0, on: true, gap: 0.07 });
     }

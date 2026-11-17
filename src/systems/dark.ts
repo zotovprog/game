@@ -24,6 +24,8 @@ export interface DarkWorld {
   dread: number;                                      // 0..1 — насколько тьма осмелела
   repel: boolean;                                     // герой у живого огня: бросок сгорает
   block: boolean;                                     // лампа прикрыта ладонью: бросок бьётся о руку и не достаёт масла
+  hunt: boolean;                                      // сейчас можно начать бросок (темп: по одному событию за раз)
+  voice: boolean;                                     // сейчас можно подать голос из темноты
   safe: SafeLight[];
 }
 
@@ -36,8 +38,8 @@ export class Darkness {
   /** 0..1 — как близко ближайший язык тьмы (для звука и давления) */
   nearness = 0;
   nearestAngle = 0;
-  /** сколько бросков за этот кадр разбилось о ладонь */
-  blocked = 0;
+  /** сколько бросков за этот кадр разбилось о ладонь; сколько началось */
+  blocked = 0; started = 0;
   /** Тьма подаёт голос: тип, панорама −1..1, громкость 0..1 */
   onSound: (s: DarkSound, pan: number, vol: number) => void = () => {};
 
@@ -98,7 +100,7 @@ export class Darkness {
   /** Возвращает язык тьмы, который дотянулся до героя, если такой есть. */
   update(dt: number, w: DarkWorld): Hunter | null {
     const S = T.spirits;
-    this.blocked = 0;
+    this.blocked = 0; this.started = 0;
     let touched: Hunter | null = null;
     let near = 0, tn = 0;
     const tend = darkU.uTendrils.value;
@@ -190,8 +192,8 @@ export class Darkness {
       h.alpha = damp(h.alpha, inRock ? 0 : 1, 3, dt);
       // бросок: чем глубже и страшнее, тем чаще
       h.cool -= dt;
-      if (h.cool <= 0 && !inRock && !burning && !w.ember && dist < w.radius + 4.5 && h.alpha > 0.6) {
-        h.state = 'windup'; h.timer = 0;
+      if (h.cool <= 0 && w.hunt && !inRock && !burning && !w.ember && dist < w.radius + 4.5 && h.alpha > 0.6) {
+        h.state = 'windup'; h.timer = 0; this.started++; w.hunt = false;
         this.onSound('hiss', clamp((dx * w.rx + dz * w.rz) / 5, -1, 1), 1);
         continue;
       }
@@ -209,7 +211,7 @@ export class Darkness {
 
     // голоса тьмы: всегда из черноты, откуда-то сбоку
     this.soundT -= dt * (0.5 + 0.5 * near + (w.ember ? 1 : 0) + 0.5 * smooth(4.5, 2.2, w.radius));
-    if (this.soundT <= 0 && w.active) {
+    if (this.soundT <= 0 && w.active && w.voice) {
       this.soundT = T.darkSound[0] + this.rng() * (T.darkSound[1] - T.darkSound[0]);          // редко: тишина пугает сильнее
       const a = this.rng() * 6.283, d = w.radius + 1.5 + this.rng() * 8;
       const side = Math.cos(a) * w.rx + Math.sin(a) * w.rz;

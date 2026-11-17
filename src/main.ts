@@ -15,7 +15,7 @@ import { Hud } from './ui/hud';
 import { Stage } from './view/stage';
 
 declare global {
-  interface Window { __GAME__?: { ready: boolean; game?: Game; tp?: (x: number, z: number) => void }; __metrics?: Record<string, unknown> }
+  interface Window { __GAME__?: { ready: boolean; game?: Game; tp?: (x: number, z: number) => void }; __metrics?: Record<string, unknown>; __events?: [number, string, string][] }
 }
 
 // ?calm=1 — без сквозняков · ?skip=1 — без вступления · ?debug=1 — панель настройки и телепорты · ?reset=1 — забыть след

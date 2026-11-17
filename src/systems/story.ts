@@ -51,9 +51,18 @@ export class Story {
   line(who: string, text: string, voice: Voice, secs = 4.5): void {
     const h = this.speakerOf(who);
     const len = this.g.sfx.say(voice, text, 'bark', this.g.panOf(h));
+    this.g.ev('bark', `${who}: ${text}`); this.g.pace.hush(T.pace.gap.bark, this.g.dread);
     this.g.hud.hint(`${who}: «${text}»`, Math.max(secs, len + 0.6));
     this.g.sfx.voice(voice);
     if (h) this.barker = { h, until: performance.now() + Math.max(2600, len * 1000) };
+  }
+
+  /** Необязательная подсказка (находка, наблюдение): показывается, только когда тихо — иначе в другой раз. */
+  private aside(text: string, secs = 6): boolean {
+    const p = this.g.pace;
+    if (!p.calm || p.since < 6 || this.g.hud.busy) return false;
+    this.g.hud.hint(text, secs);
+    return true;
   }
 
   // ---------- память пещеры
@@ -116,7 +125,7 @@ export class Story {
     g.setStood();
     g.takeLamp();
     g.flags.add('goal'); g.flags.add('dead');
-    g.flags.add('firstDark');
+    g.flags.add('firstDark'); g.pace.jump(4);
     g.dark.setCount(T.spirits.count);
   }
 
@@ -126,8 +135,7 @@ export class Story {
     g.flags.add('dead');                                    // записка — это и есть осмотр того, кто нёс лампу
     g.hud.say('', [TX.afterLamp, ...TX.note], () => {
       g.flags.add('goal');
-      g.hud.hint(TX.goalHint, 9);
-      g.after(1.6, () => { g.hud.whisper(TX.whispers[0], 0.8); g.sfx.whisper(0.6, 0.1); });
+      // дальше — тишина: тьма проснётся позже (systems/pace); про стрелку скажем, когда будет тихо
     }, true);
   }
 
@@ -144,7 +152,6 @@ export class Story {
     g.sfx.ignite();
     g.dark.scatter();
     if (!g.flags.has('brazier')) { g.flags.add('brazier'); g.after(1.5, () => g.hud.hint(TX.brazier, 8)); }
-    g.after(g.flags.has('checkHint') ? 0.5 : 10, () => { if (!g.flags.has('checkHint')) { g.flags.add('checkHint'); g.hud.hint(TX.checkpoint, 7); } });
     this.checkpoint();
   }
 
@@ -153,7 +160,7 @@ export class Story {
     const g = this.g, n = g.npcs, m = g.mila, sh = g.shade;
     const npc = (c: Npc) => ({ state: c.state === 'crawl' ? 'follow' as const : c.state, x: c.x, z: c.z, goal: c.goal ? { ...c.goal } : null });
     saved = {
-      x: g.pos.x, z: g.pos.z, oil: Math.max(g.lamp.oil, 50), carried: Math.max(g.lamp.flasks, 1), forsaken: g.forsaken.takenIds(), flags: [...g.flags],
+      x: g.pos.x, z: g.pos.z, oil: Math.max(g.lamp.oil, 50), stage: g.pace.stage, carried: Math.max(g.lamp.flasks, 1), forsaken: g.forsaken.takenIds(), flags: [...g.flags],
       braziers: g.braziers.map((b, i) => (b.f.lit ? i : -1)).filter((i) => i >= 0),
       flasks: g.flasks.map((f, i) => (f.taken && !f.own ? i : -1)).filter((i) => i >= 0),
       holes: g.holes.map((h, i) => (h.done ? i : -1)).filter((i) => i >= 0),
@@ -172,7 +179,7 @@ export class Story {
     g.mode = 'play'; g.hero.setPose('stand', true); g.setStood(); g.takeLamp();
     g.stage.fade = 1;
     for (let i = 0; i <= 20; i++) g.after(0.3 + i * 0.1, () => { g.stage.fade = 1 - i / 20; });
-    g.lamp.oil = s.oil; g.lamp.flasks = s.carried; g.lamp.lit = true; g.pos.x = s.x; g.pos.z = s.z;
+    g.lamp.oil = s.oil; g.lamp.flasks = s.carried; g.pace.jump(s.stage); g.pace.hush(10); g.lamp.lit = true; g.pos.x = s.x; g.pos.z = s.z;
     g.stage.target.set(s.x, 0, s.z);
     for (const f of s.flags) g.flags.add(f);
     for (const i of s.braziers) { const b = g.braziers[i]; b.f.lit = true; b.f.k = 1; }
@@ -238,7 +245,7 @@ export class Story {
     n.state = 'follow';
     g.companions.push(n);
     g.sfx.ignite();
-    if (!g.flags.has('partyHint')) { g.flags.add('partyHint'); g.after(7, () => g.hud.hint(TX.partyHint, 9)); }
+    if (!g.flags.has('partyHint')) { g.flags.add('partyHint'); g.after(12, () => g.hud.hint(TX.partyHint, 7)); }
   }
 
   // ---------- отряд
@@ -546,7 +553,8 @@ export class Story {
         this.line(TX.family.boy, TX.hole.done, 'boy', 4);
       }
     }
-    if (!g.flags.has('cairn') && g.def.cairns.some((c) => g.dist(c[0], c[1]) < 2.6)) { g.flags.add('cairn'); g.hud.hint(TX.cairn, 6); }
+    if (!g.flags.has('cairn') && g.def.cairns.some((c) => g.dist(c[0], c[1]) < 2.6) && this.aside(TX.cairn)) g.flags.add('cairn');
+    if (g.flags.has('goal') && !g.flags.has('arrowHint') && g.pace.t > 9 && this.aside(TX.goalHint, 6)) g.flags.add('arrowHint');
     // чутьё спутников и голоса тех, кого ты ещё не нашёл
     if ((this.senseT -= dt) <= 0) {
       this.senseT = 2.5;
@@ -562,14 +570,14 @@ export class Story {
         if (!unmet || g.dist(x, z) > T.party.callRange || g.dist(x, z) < g.radius || !once(`call-${id}`)) continue;
         g.hud.marker(`call-${id}`, x, z, TX.mark.voice, 9);
         g.sfx.voice(voice);
-        if (once('callHint')) g.hud.hint(TX.call, 5);
+        if (!g.flags.has('callHint') && this.aside(TX.call, 5)) g.flags.add('callHint');
       }
       // Ефим чует масло
       if (n.efim.state === 'follow') g.flasks.forEach((fl, i) => {
         const d = g.dist(fl.x, fl.z);
         if (fl.taken || fl.own || d > T.party.oilSense || d < g.radius + 1 || !once(`oil-${i}`)) return;
         g.hud.marker(`oil-${i}`, fl.x, fl.z, TX.mark.oil, 10);
-        this.line(TX.efim.realName, TX.efim.sense, 'efim', 4);
+        if (once('oilLine')) this.line(TX.efim.realName, TX.efim.sense, 'efim', 4);       // говорит один раз; дальше — молча показывает
       });
       // Мила видит, какой огонь ложный
       if (m.state === 'carried' || m.state === 'vera') for (const w of g.wisps) {
@@ -582,7 +590,7 @@ export class Story {
         const near = targets.filter(([x, z]) => g.dist(x, z) < 45).sort((p, q) => g.dist(p[0], p[1]) - g.dist(q[0], q[1]))[0];
         if (near && g.dist(near[0], near[1]) > g.radius + 2) {
           g.hud.marker('sense', near[0], near[1], TX.mark.someone, 3.2);
-          if (once(`sense-${Math.round(near[0])}`)) this.line(TX.shade.name, TX.shade.sense, 'shade', 4);
+          if (once('senseLine')) this.line(TX.shade.name, TX.shade.sense, 'shade', 4);
         }
       }
     }
@@ -661,15 +669,10 @@ export class Story {
 
   private zone(id: string): void {
     const g = this.g;
-    if (id === 'firstDark') {
-      g.after(2.5, () => g.hud.hint(TX.firstDark[0], 4.5));
-      g.after(8, () => g.hud.hint(TX.firstDark[1], 5));
-    } else if (id === 'draft') {
-      g.hud.hint(TX.draft, 7);
-      g.after(8, () => g.forceGust());          // первый порыв — здесь же: сразу ясно, зачем ладонь
-    } else if (id === 'seeWisp') {
+    if (id === 'seeWisp') {
       g.hud.hint(TX.seeWisp, 5);
     } else if (id === 'peek') {
+      if (g.pace.stage < 3) return;                           // пока она не охотится — не бросается
       // из-за колонны: лицо бросается и сгорает у самого света
       const ax = g.pos.x - g.face.z * 2 + g.face.x * (g.radius + 3), az = g.pos.z + g.face.x * 2 + g.face.z * (g.radius + 3);
       g.dark.lunge(ax, az); g.sfx.stinger(); g.stage.shake = 0.6; g.chroma = 0.8;
@@ -698,7 +701,7 @@ export class Story {
   }
 
   /** Первый сквозняк в пустоте: учит прикрывать лампу ладонью. */
-  private gustScare(): void { this.g.forceGust(); }
+  private gustScare(): void { if (this.g.pace.stage >= 2) this.g.forceGust(); }
 
   /** Расплата: те, мимо кого ты прошёл, возвращаются. Обычный свет их не держит. */
   private returned(): void {
@@ -875,7 +878,7 @@ export class Story {
 }
 
 export interface Snapshot {
-  x: number; z: number; oil: number; carried: number; forsaken: ('efim' | 'family' | 'mila')[]; flags: string[];
+  x: number; z: number; oil: number; carried: number; stage: number; forsaken: ('efim' | 'family' | 'mila')[]; flags: string[];
   braziers: number[]; flasks: number[]; holes: number[]; wisps: string[]; toy: boolean;
   npcs: Record<'efim' | 'vera' | 'boy', { state: Npc['state']; x: number; z: number; goal: { x: number; z: number } | null }>;
   order: ('efim' | 'vera' | 'boy')[];
