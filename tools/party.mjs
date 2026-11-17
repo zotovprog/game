@@ -48,7 +48,7 @@ await shot('camped');
 await D(`(() => { const g = window.__GAME__.game, b = g.braziers[0]; g.pos.x = b.x + 1.2; g.pos.z = b.z + 0.6; })()`); await wait(1.5);
 console.log('prompt on return:', await D(`document.querySelector('#act').textContent`));
 await key('Space'); await wait(1.5);
-await D(`(() => { const g = window.__GAME__.game; window.__GAME__.tp(150, 178); })()`); await wait(2);
+await D(`(() => { const g = window.__GAME__.game; window.__GAME__.tp(145, 176.8); })()`); await wait(2);
 await D(`(() => { const g = window.__GAME__.game; g.pos.x += 8; g.pos.z += 4; })()`);
 await page.waitForFunction(`window.__metrics.flags.includes('efimLost')`, null, { timeout: 240000 });
 await wait(1.5); await shot('taken');

@@ -23,7 +23,7 @@ export const T = {
     rMin: 0.36, rMax: 0.72, hitAgain: 0.45 },   // круг света у сбитого пламени (доля обычного); второй порыв по сбитому
   // сквозняк: предупреждение, потом порыв; не прикрыл лампу — гаснет
   gust: { warn: 1.4, blow: 1.5, exposed: 0.45, firstWarn: 2.6,
-    every: { void: [11, 19], fissure: [15, 26], water: [22, 36], rubble: [26, 44], mine: [28, 46], columns: [22, 38], gate: [45, 70] } as Record<string, [number, number]> },
+    every: { void: [11, 19], fissure: [15, 26], water: [22, 36], rubble: [26, 44], mine: [28, 46], columns: [22, 38], gate: [45, 70], room: [70, 110] } as Record<string, [number, number]> },
   // страх нарастает: от входа к Вратам тьма злее, броски чаще, масло горит быстрее
   dread: {
     start: 0.12, deep: 0.92,     // у места пробуждения и у Врат
@@ -43,6 +43,8 @@ export const T = {
     threads: 64, threadLen: [1.2, 2.6], threadWidth: 0.42, threadGain: 0.72, threadLife: [1.3, 2.6], gustRush: 1.6,      // нити воздуха над полом
     coal: 0.3, coalGlow: [0.45, 0.85], coalFar: 26 },
   // у живого огня морок спадает: ложные огни и ложные голоса в этом радиусе гаснут
+  // залы памяти: теснины и загадки
+  hall: { crawlSpeed: 0.4, squeezeSpeed: 0.5, crawlLight: 0.72, holdTide: 17, shadowTime: 1.5, shadowReach: 5.5, shadowAim: 0.5 },
   truth: { range: 32, lureReach: 2.6 },
   spirits: {
     count: 1, margin: 0.8,       // держатся за границей света на таком расстоянии

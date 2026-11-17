@@ -3,6 +3,7 @@ export interface Style {
   lamp: number;          // огонёк в руке: тёплый
   lampGain: number;
   fire: number;          // зарезервированный тёплый акцент: живое, человеческое, выход
+  fireLight: number;     // свет костров и чаш на стенах: теплее белого, но не красит всё в рыжий
   wisp: number;          // ложный огонь: мёртвенно-бледный
   rock: number; rockAlt: number; floor: number; floorAlt: number;
   edgeNoise: number;     // насколько тьма въедается в границу света
@@ -16,7 +17,7 @@ export interface Style {
 }
 
 export const STYLE: Style = {
-  lamp: 0xffb46e, lampGain: 1.6, fire: 0xff8a3a, wisp: 0xd6ecd0,
+  lamp: 0xffc48c, lampGain: 1.6, fire: 0xff8a3a, fireLight: 0xffb070, wisp: 0xd6ecd0,
   rock: 0x5a646e, rockAlt: 0x333b43, floor: 0x4a535b, floorAlt: 0x232a30,
   edgeNoise: 0.6,
   sat: 0.78, contrast: 1.14, tint: [1.0, 0.995, 0.985],

@@ -14,7 +14,10 @@ await page.click('.overlay button');
 // бот живёт в странице: решает раз в 60 мс
 await page.evaluate(`(() => {
   const g = window.__GAME__.game, K = (c, on) => g.input.hold(c, on);
-  const way = [[183.9, 197.7, 'lamp'], [174, 193], [166, 186.5], [160.5, 182.5], [0, 0, 'b0'], [160.5, 182.5], [149, 178.5], [141, 174.8], [134.6, 172.2, 'efim'], [131, 165], [128, 160], [124, 153], [0, 0, 'b1'], [112, 147], [106, 150], [98, 156], [0, 0, 'b2'], [94, 156], [88, 148], [82, 138], [0, 0, 'b3']];
+  // дорога первого куска: дверь прихожей, жаровня, лаз под завалом, Ефим, кухня (чаши по рисунку, дверь), щель, жаровня, тень статуи, плита
+  const way = [[183.9, 197.7, 'lamp'], [179.5, 195.35, 'door:hall'], [177, 194.4], [174, 193], [166, 186.5], [160.5, 182.5], [0, 0, 'b0'], [158.4, 181.5], [155.8, 180.7], [152.5, 179.55], [149.2, 178.4], [146, 177.3], [141, 174.8],
+    [134.6, 172.2, 'efim'], [0, 0, 'b8'], [131.6, 167.6], [129.6, 163.2], [129.2, 161.2], [0, 0, 'bowl:0'], [0, 0, 'bowl:1'], [127.6, 161.7], [125.2, 161.2], [0, 0, 'bowl:2'], [126.6, 156.3, 'door:kitchen'], [126.5, 154.4], [126.5, 151.7], [123.7, 148.7], [0, 0, 'b1'],
+    [0, 0, 'shadow:statue'], [107.3, 150.9], [104.4, 150.7], [98, 156], [0, 0, 'b2'], [94, 156], [88, 148], [82, 138], [0, 0, 'b3']];
   let i = 0, talkT = 0;
   window.__bot = setInterval(() => {
     const l = g.lamp, d = document.querySelector('#dialog');
@@ -31,14 +34,19 @@ await page.evaluate(`(() => {
     if (need) { K('KeyR', l.draft + l.draftV * 0.25 < g.fanC); return; }  // сбито — стоит и раздувает
     K('KeyR', false);
     if (g.dark.hunters.some((h) => h.state === 'windup' || (h.state === 'lunge' && !h.fake))) K('ShiftLeft', true);   // шипение — ладонь
-    const w = way[Math.min(i, way.length - 1)];
-    const bz = w[2] && w[2][0] === 'b' ? g.braziers[+w[2][1]] : null;
-    const at = w[2] === 'lamp' ? g.lampOnGround : w[2] === 'efim' ? g.npcs.efim : bz ? bz : { x: w[0], z: w[1] };   // к огню, к Ефиму и к жаровням — по их настоящему месту
+    const w = way[Math.min(i, way.length - 1)], tag = w[2] || '';
+    const bz = tag[0] === 'b' && tag.length === 2 ? g.braziers[+tag[1]] : null;
+    const bowl = tag.startsWith('bowl:') ? g.halls.order('kitchen')[+tag.slice(5)] : null;
+    const spot = tag.startsWith('shadow:') ? g.halls.shadowSpot(tag.slice(7)) : null;
+    const at = tag === 'lamp' ? g.lampOnGround : tag === 'efim' ? g.npcs.efim : bz ? bz : bowl ? { x: bowl.x + 0.85, z: bowl.z + 0.85 } : spot ? spot : { x: w[0], z: w[1] };   // к огню, людям, жаровням и чашам — по их настоящему месту
     const dx = at.x - g.pos.x, dz = at.z - g.pos.z, dist = Math.hypot(dx, dz);
-    if (dist < (w[2] === 'lamp' ? 0.9 : w[2] === 'efim' || bz ? 1.7 : 1.1)) {
-      if (w[2] === 'lamp' && !l.held) { g.input.press('Space'); return; }
-      if (w[2] === 'efim' && g.npcs.efim.state === 'wait') { g.input.press('Space'); return; }
+    if (dist < (tag === 'lamp' ? 0.9 : tag === 'efim' || bz ? 1.7 : bowl || spot || tag.startsWith('door:') ? 0.45 : 1.0)) {
+      if (tag === 'lamp' && !l.held) { g.input.press('Space'); return; }
+      if (tag === 'efim' && g.npcs.efim.state === 'wait') { g.input.press('Space'); return; }
       if (bz && !bz.dead) { if (!bz.f.lit) { g.input.press('Space'); return; } if (l.oil < 97) return; }      // зажёг — и стоит, пока огонёк не разгорится
+      if (tag.startsWith('door:')) { if (!g.halls.isOpen(tag.slice(5))) { if (document.querySelector('#act')?.textContent.includes('ткрыть')) g.input.press('Space'); return; } }   // простую открывает, запертую ждёт
+      if (bowl) { const lit = g.halls.fires.find((f) => f.x === bowl.x && f.z === bowl.z).f.lit; if (!lit) { if (document.querySelector('#act')?.textContent.includes('чашу')) g.input.press('Space'); return; } }
+      if (spot && !g.halls.isOpen('slab')) return;                 // стоит так, чтобы тень легла на знак, и ждёт плиту
       if (i < way.length - 1) i++;
       return;
     }
@@ -52,7 +60,7 @@ const r = await page.evaluate(`(() => { const g = window.__GAME__.game; return {
 await browser.close();
 const short = (s) => (s.length > 64 ? s.slice(0, 62) + '…' : s);
 for (const [t, k, s] of r.ev) if (k !== 'dark') console.log(String(t.toFixed(0)).padStart(4) + 'с  ' + k.padEnd(8) + short(s));
-const words = new Set(['hint', 'say', 'bark', 'whisper']), threat = new Set(['gust', 'knock', 'out', 'lunge', 'bite', 'block', 'scream', 'walker', 'press', 'fall']);
+const words = new Set(['hint', 'say', 'bark', 'whisper']), threat = new Set(['gust', 'knock', 'out', 'lunge', 'bite', 'block', 'scream', 'walker', 'press', 'fall', 'scare', 'bowlsOut']);
 console.log('\nокно      слова  угрозы  звуки тьмы');
 for (let a = 0; a < r.t; a += 30) {
   const win = r.ev.filter(([t]) => t >= a && t < a + 30);

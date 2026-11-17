@@ -295,6 +295,12 @@ export class Sfx {
   }
   ignite(): void { if (this.ctx) { this.burst(this.brown, 'bandpass', 180, 1400, 0.7, 0.5, 0, 0.5, 0.8); this.burst(this.white, 'highpass', 2500, 5000, 0.25, 0.05); } }
   relight(): void { if (this.ctx) { this.burst(this.white, 'bandpass', 400, 2600, 0.35, 0.16, 0, 0.4, 0.9); } }
+  /** Дверь на старых петлях: долгий скрип. */
+  creak(pan = 0): void { if (this.ctx) { this.tone('sawtooth', 310, 180, 1.5, 0.05, pan, 0.6, 0.3); this.tone('sawtooth', 465, 250, 1.3, 0.03, pan, 0.6, 0.4); this.burst(this.brown, 'bandpass', 500, 220, 1.5, 0.25, pan, 0.6, 3); } }
+  /** Запертая дверь: дёргаешь ручку. */
+  rattle(pan = 0): void { if (this.ctx) { for (let i = 0; i < 3; i++) setTimeout(() => this.ctx && this.burst(this.brown, 'bandpass', 420, 260, 0.09, 0.5, pan, 0.4, 2), i * 110); } }
+  /** Каменная плита уходит в пол. */
+  rumble(dur = 2.5, pan = 0): void { if (this.ctx) { this.burst(this.brown, 'lowpass', 160, 60, dur, 1.0, pan, 0.7, 0.8); this.tone('sine', 46, 32, dur, 0.5, pan, 0.5, 0.4); } }
   snuff(pan = 0): void { if (this.ctx) this.burst(this.white, 'highpass', 6000, 700, 0.45, 0.12, pan, 0.8); }
   gust(): void { if (this.ctx) { this.burst(this.brown, 'bandpass', 160, 900, 1.1, 0.9, -0.5, 0.6, 0.7); setTimeout(() => this.ctx && this.burst(this.brown, 'bandpass', 800, 150, 1.6, 0.7, 0.5, 0.6, 0.7), 500); } }
   touch(): void { if (this.ctx) { this.tone('sine', 90, 30, 0.5, 0.6, 0, 0.3); this.burst(this.white, 'bandpass', 900, 3200, 0.3, 0.14, 0, 0.6, 3); } }

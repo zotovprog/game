@@ -4,6 +4,7 @@ import { Voice } from '../audio/sfx';
 import { saveTrace } from '../core/save';
 import { TX } from '../data/texts';
 import { T } from '../data/tuning';
+import type { HallSave } from './halls';
 import type { Game, Npc } from '../scenes/game';
 import { Human } from '../view/human';
 import { Candle } from '../view/props';
@@ -179,6 +180,7 @@ export class Story {
       npcs: { efim: npc(n.efim), vera: npc(n.vera), boy: npc(n.boy) }, order: g.companions.map((c) => c.id),
       mila: { state: m.state, x: m.x, z: m.z }, family: g.family.state,
       shade: { state: sh.state, x: sh.x, z: sh.z, isTrue: sh.isTrue },
+      halls: g.halls.save(),
     };
   }
 
@@ -195,7 +197,8 @@ export class Story {
     for (const f of s.flags) g.flags.add(f);
     g.braziers.forEach((b, i) => { b.f.lit = s.braziers.includes(i); b.f.k = b.f.lit ? 1 : 0; b.dead = s.dead.includes(i); b.life = T.tide.hold; b.f.strength = 1; });
     for (const i of s.flasks) { const f = g.flasks[i]; if (f) { f.taken = true; f.g.visible = false; } }
-    for (const i of s.holes) g.holes[i].done = true;
+    for (const i of s.holes) if (g.holes[i]) g.holes[i].done = true;
+    g.halls.restore(s.halls);
     for (const w of g.wisps) if (s.wisps.includes(w.id)) { w.w.out = true; w.w.k = 0; }
     if (s.toy) { g.toy.taken = true; g.toy.g.visible = false; }
     g.family.state = s.family;
@@ -934,6 +937,7 @@ export interface Snapshot {
   mila: { state: Game['mila']['state']; x: number; z: number };
   family: Game['family']['state'];
   shade: { state: Game['shade']['state']; x: number; z: number; isTrue: boolean };
+  halls?: HallSave;
 }
 let saved: Snapshot | null = null;
 /** Точка возврата (если герой зажигал огонь). */

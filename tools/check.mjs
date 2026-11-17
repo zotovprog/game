@@ -24,7 +24,7 @@ console.log('oil', o0.toFixed(0), '→', (await D(`${G}.lamp.oil`)).toFixed(0), 
 await D(`(() => { const g = ${G}, b = g.braziers[0]; g.lamp.oil = 80; window.__GAME__.tp(b.x + 1.2, b.z + 0.6); })()`); await wait(1.5);
 await key('Space'); await wait(2.5);
 console.log('brazier lit', await D(`${G}.braziers[0].f.lit`));
-await D(`(() => { const g = ${G}; window.__GAME__.tp(149, 177.5); g.lamp.oil = 0.3; })()`);
+await D(`(() => { const g = ${G}; window.__GAME__.tp(145, 176.6); g.lamp.oil = 0.3; })()`);
 await page.waitForFunction('window.__metrics.mode === "dead"', null, { timeout: 240000 });
 await page.waitForSelector('.overlay.black button', { timeout: 120000 });
 await wait(7); await shot('dead');

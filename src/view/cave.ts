@@ -7,12 +7,18 @@ import {
 import { clamp, fbm, hash2, lerp, mulberry32, smooth } from '../core/rng';
 import { LevelDef } from '../data/level';
 import { Style } from '../data/styles';
-import { Grid, Kind } from '../world/grid';
-import { darkify } from './darkness';
+import { distPolyline, distRect, Grid, Kind } from '../world/grid';
+import { ART, Model, ModelId } from './art';
+import { darkify, Tri } from './darkness';
 
 const SUB = 2, STEP = 1 / SUB, CH = 16;
-const WALL_H: Record<Kind, number> = { rubble: 3.0, mine: 2.8, columns: 3.5, water: 3.2, void: 2.4, fissure: 3.4, gate: 4.2 };
-const TONE: Record<Kind, number> = { rubble: 1, mine: 0.92, columns: 1.06, water: 0.72, void: 0.8, fissure: 0.95, gate: 1.1 };
+const WALL_H: Record<Kind, number> = { rubble: 3.0, mine: 2.8, columns: 3.5, water: 3.2, void: 2.4, fissure: 3.4, gate: 4.2, room: 3.1 };
+const TONE: Record<Kind, number> = { rubble: 1, mine: 0.92, columns: 1.06, water: 0.72, void: 0.8, fissure: 0.95, gate: 1.1, room: 1 };
+// цвет породы по зонам (множитель к текстуре): пещера не серая — охра выработки, зелень у воды, синева пустоты, краснота разлома
+const HUE: Record<Kind, [number, number, number]> = {
+  rubble: [1.0, 0.94, 0.86], mine: [1.12, 0.98, 0.76], columns: [0.86, 0.98, 1.04], water: [0.52, 0.86, 0.78],
+  void: [0.66, 0.72, 1.06], fissure: [1.1, 0.74, 0.66], gate: [1.16, 1.02, 0.8], room: [0.95, 0.92, 0.88],
+};
 
 export interface Cave { cairns: { x: number; y: number; z: number }[]; group: Group; dispose(): void }
 interface Inst { m: Matrix4; c: Color }
@@ -34,6 +40,24 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
   const group = new Group();
   const trash: { dispose(): void }[] = [];
   const cA = new Color(style.floor), cB = new Color(style.floorAlt), rA = new Color(style.rock), rB = new Color(style.rockAlt), col = new Color();
+  // новый вид: текстуры камня и земли загружены — цвет вершин только подкрашивает их
+  const wallTex = ART.tex.rock_face_03, groundTex = ART.tex.brown_mud_rocks_01, propTex = ART.tex.cliff_side, woodTex = ART.tex.worn_planks;
+  const textured = !!(wallTex && groundTex);
+  const moss = new Color(0.5, 0.92, 0.42), rust = new Color(1.3, 0.78, 0.46), hue = new Color();
+  /** Подкраска точки: зона, пятна мха и ржавые потёки. */
+  const tintAt = (x: number, z: number, kind: Kind, wet: number): Color => {
+    hue.setRGB(HUE[kind][0], HUE[kind][1], HUE[kind][2]);
+    const mk = smooth(0.52, 0.72, fbm(x * 0.31, z * 0.31, seed + 40, 2)) * (kind === 'water' || kind === 'columns' ? 0.9 : kind === 'void' || kind === 'rubble' ? 0.45 : 0.2) * wet;
+    const rk = smooth(0.6, 0.74, fbm(x * 0.5 + 9, z * 0.5 - 4, seed + 41, 2)) * (kind === 'mine' || kind === 'fissure' || kind === 'gate' ? 0.8 : 0.35);
+    return hue.lerp(moss, mk).lerp(rust, rk * (1 - mk));
+  };
+
+  // залы памяти и теснины: там пол ровный, пещерной мелочи нет, а над лазом стены низкие
+  const crawls = def.tights.filter((t) => t.kind === 'crawl');
+  const roomEdge = (x: number, z: number): number => def.rooms.reduce((m, r) => Math.max(m, -distRect(x, z, r.rect)), -9);      // > 0 — внутри комнаты, глубина от края
+  const reserved = (x: number, z: number): boolean =>
+    roomEdge(x, z) > -0.7 || def.tights.some((t) => distPolyline(x, z, t.pts) < 1.7) || def.carves.some((c) => c.rough === 0 && !c.rect && distPolyline(x, z, c.pts) < c.r + 1) || def.doors.some((d) => Math.hypot(d.at[0] - x, d.at[1] - z) < 2.2)
+    || def.shadows.some((s) => Math.hypot(s.statue[0] - x, s.statue[1] - z) < 3.4) || def.bowls.some((b) => b.bowls.some((p) => Math.hypot(p[0] - x, p[1] - z) < 1.4));
 
   // ---------- рельеф: высоты и цвета по вершинам
   const VW = grid.w * SUB + 1, VH = grid.h * SUB + 1;
@@ -84,20 +108,24 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
       const dIn = -d;
       h = (fbm(x * 0.9, z * 0.9, seed + 5, 3) - 0.5) * 0.1 + 0.13 * (1 - smooth(0, 0.8, dIn)) ** 2;
       if (kind === 'water') h -= 0.36 * smooth(0.5, 2.0, dIn);
+      h *= 1 - smooth(-0.3, 0.5, roomEdge(x, z));                          // в комнате пол ровный: на нём лежит настил
       const grit = fbm(x * 1.9, z * 1.9, seed + 14, 2);                    // мелкая фактура: камень, а не ровная плита
-      col.copy(cA).lerp(cB, clamp((fbm(x * 0.23, z * 0.23, seed + 9, 3) - 0.3) * 2.2, 0, 1)).multiplyScalar(TONE[kind] * (0.62 + grit * 0.7) * (0.92 + hash2(gx, gz, seed) * 0.16));
+      if (textured) col.copy(tintAt(x, z, kind, 1)).multiplyScalar((0.74 + grit * 0.5) * (0.82 + 0.3 * fbm(x * 0.23, z * 0.23, seed + 9, 3)));
+      else col.copy(cA).lerp(cB, clamp((fbm(x * 0.23, z * 0.23, seed + 9, 3) - 0.3) * 2.2, 0, 1)).multiplyScalar(TONE[kind] * (0.62 + grit * 0.7) * (0.92 + hash2(gx, gz, seed) * 0.16));
     } else {
       // камень со стороны камеры (+x+z от пола) — низкий бортик, иначе закроет героя
       const gxd = S(gx + 1, gz, d) - S(gx - 1, gz, d), gzd = S(gx, gz + 1, d) - S(gx, gz - 1, d), gl = Math.hypot(gxd, gzd) || 1;
       const facing = (gxd + gzd) / gl * 0.7071;
       const Hk = WALL_H[kind] * (0.8 + 0.45 * fbm(x * 0.15, z * 0.15, seed + 3, 2));
       const low = smooth(-0.1, 0.6, facing);
-      const H = lerp(Hk, 1.2, low);
+      const overCrawl = crawls.length ? smooth(1.0, 3.4, Math.min(...crawls.map((t) => distPolyline(x, z, t.pts)))) : 1;      // над лазом — низко: завал, а не стена
+      const H = lerp(Hk, 1.2, low) * (0.3 + 0.7 * overCrawl);
       h = 0.13 + H * (1 - Math.exp(-d * 1.9)) + (fbm(x * 0.42, z * 0.42, seed + 6, 2) - 0.5) * 0.9 * smooth(0.3, 1.7, d) + (hash2(gx, gz, seed + 4) - 0.5) * 0.03;
       const strata = 0.5 + 0.5 * Math.sin(h * 4.2 + fbm(x * 0.5, z * 0.5, seed + 12, 2) * 6);
       // за гребнем стены ничего нет: камень там чёрный, чтобы не казалось, будто туда можно пройти
       const beyond = (1 - low * smooth(0.3, 0.9, d)) * (1 - smooth(1.15, 2.0, d));
-      col.copy(rA).lerp(rB, strata * 0.8).multiplyScalar(TONE[kind] * (1 - 0.06 * Math.min(h, 4)) * beyond);
+      if (textured) col.copy(tintAt(x, z, kind, 1 - smooth(0.4, 1.6, h))).multiplyScalar((0.8 + 0.3 * strata) * (1 - 0.05 * Math.min(h, 4)) * beyond);
+      else col.copy(rA).lerp(rB, strata * 0.8).multiplyScalar(TONE[kind] * (1 - 0.06 * Math.min(h, 4)) * beyond);
     }
     hgt[v] = h; rgb[v * 3] = col.r; rgb[v * 3 + 1] = col.g; rgb[v * 3 + 2] = col.b;
   }
@@ -118,7 +146,8 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
     }
     hgt.set(nx);
   }
-  const terrainMat = darkify(new MeshStandardMaterial({ vertexColors: true, roughness: 0.93, metalness: 0 }), true, false, true);
+  const tri: Tri | undefined = textured ? { wallC: wallTex!.c, wallN: wallTex!.n, groundC: groundTex!.c, groundN: groundTex!.n, wall: 0.3, ground: 0.42, gain: 1.55, bump: 1.3 } : undefined;
+  const terrainMat = darkify(new MeshStandardMaterial({ vertexColors: true, roughness: 0.93, metalness: 0 }), true, false, !textured, tri);
   trash.push(terrainMat);
   const P = (gx: number, gz: number, out: Vector3, fb: Vector3): Vector3 => {
     if (gx < 0 || gz < 0 || gx >= VW || gz >= VH) return out.copy(fb);
@@ -162,8 +191,10 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
   }
 
   // ---------- что стоит в пещере
-  const rockMat = darkify(new MeshStandardMaterial({ color: 0xffffff, roughness: 0.92 }), true, false, true);
-  const woodMat = darkify(new MeshStandardMaterial({ color: 0x2a2018, roughness: 1 }), true);
+  const propTri: Tri | undefined = propTex ? { wallC: propTex.c, wallN: propTex.n, groundC: propTex.c, groundN: propTex.n, wall: 0.5, ground: 0.5, gain: 1.05, bump: 1.2 } : undefined;
+  const rockMat = darkify(new MeshStandardMaterial({ color: 0xffffff, roughness: 0.92 }), true, false, !propTri, propTri);
+  const woodTri: Tri | undefined = woodTex ? { wallC: woodTex.c, wallN: woodTex.n, groundC: woodTex.c, groundN: woodTex.n, wall: 0.9, ground: 0.9, gain: 1.5, bump: 1 } : undefined;
+  const woodMat = darkify(new MeshStandardMaterial({ color: woodTex ? 0xd8c8b4 : 0x2a2018, roughness: 1 }), true, false, false, woodTri);
   const ironMat = darkify(new MeshStandardMaterial({ color: 0x23262a, roughness: 0.55, metalness: 0.7 }));
   const boneMat = darkify(new MeshStandardMaterial({ color: 0xa8a294, roughness: 0.8 }));
   trash.push(rockMat, woodMat, ironMat, boneMat);
@@ -202,12 +233,24 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
   trash.push(boulderGeo, spikeGeo, colGeo, pebbleGeo);
   const boulders: Inst[] = [], spikes: Inst[] = [], columns: Inst[] = [], pebbles: Inst[] = [], bones: Inst[] = [];
   const q = new Quaternion(), e = new Euler(), s = new Vector3(), p = new Vector3();
-  const tint = () => rA.clone().lerp(rB, rng()).multiplyScalar(0.85 + rng() * 0.3);
+  const tint = () => (textured ? new Color(0.84, 0.88, 0.92).multiplyScalar(0.7 + rng() * 0.45) : rA.clone().lerp(rB, rng()).multiplyScalar(0.85 + rng() * 0.3));
+  // валуны и утварь выработки: модели, если загрузились
+  const boulderIds: ModelId[] = ['namaqualand_boulder_02', 'namaqualand_boulder_03', 'namaqualand_boulder_05', 'namaqualand_boulder_06'];
+  const boulderModels = boulderIds.map((id) => ART.models[id]).filter((m): m is Model => !!m);
+  const modelInst = new Map<Model, Inst[]>();
+  /** Экземпляр модели: r — радиус следа на полу (м), tall — множитель высоты. */
+  const place = (m: Model, x: number, y: number, z: number, ry: number, r: number, tall = 1, c = new Color(1, 1, 1), tilt = 0) => {
+    const k = (r * 2) / Math.max(m.size.x, m.size.z);
+    e.set(tilt * (rng() - 0.5), ry, tilt * (rng() - 0.5)); q.setFromEuler(e);
+    let list = modelInst.get(m);
+    if (!list) modelInst.set(m, (list = []));
+    list.push({ m: new Matrix4().compose(p.set(x, y, z), q, s.set(k, k * tall, k)), c });
+  };
   const keep: [number, number][] = [def.start.hero, def.start.lamp, def.start.dead, ...def.flasks, ...def.braziers, ...def.wisps.map((w) => w.at),
     def.efim.at, def.efim.fire, def.vera.at, ...def.vera.path, def.mila.at, def.family.fire, def.shade.at, def.toy.at, def.gate.bowl, def.cart, ...def.rails.flat()];
-  const clear = (x: number, z: number, r: number) => keep.every((k) => Math.hypot(k[0] - x, k[1] - z) > r);
-  const SPIKE: Record<Kind, number> = { rubble: 0.07, mine: 0.02, columns: 0.2, water: 0.16, void: 0.03, fissure: 0.16, gate: 0.02 };
-  const BOULDER: Record<Kind, number> = { rubble: 0.1, mine: 0.04, columns: 0.05, water: 0.07, void: 0.1, fissure: 0.05, gate: 0.03 };
+  const clear = (x: number, z: number, r: number) => !reserved(x, z) && keep.every((k) => Math.hypot(k[0] - x, k[1] - z) > r);
+  const SPIKE: Record<Kind, number> = { rubble: 0.07, mine: 0.02, columns: 0.2, water: 0.16, void: 0.03, fissure: 0.16, gate: 0.02, room: 0 };
+  const BOULDER: Record<Kind, number> = { rubble: 0.1, mine: 0.04, columns: 0.05, water: 0.07, void: 0.1, fissure: 0.05, gate: 0.03, room: 0 };
   for (let j = 0; j < grid.h; j++) for (let i = 0; i < grid.w; i++) {
     if (!grid.floorCell(i, j)) continue;
     const kind = grid.kindAt(i, j);
@@ -221,7 +264,8 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
     } else if ((nearWall ? rng() < BOULDER[kind] : kind === 'void' && rng() < 0.014) && clear(x, z, 1.8)) {
       const r = nearWall ? 0.3 + rng() * 0.45 : 0.6 + rng() * 0.7;
       e.set(rng() * 0.6, rng() * 6.28, rng() * 0.6); q.setFromEuler(e);
-      boulders.push({ m: new Matrix4().compose(p.set(x, r * 0.25, z), q, s.set(r * (0.9 + rng() * 0.4), r * (0.6 + rng() * 0.4), r)), c: tint() });
+      if (boulderModels.length) place(boulderModels[Math.floor(rng() * boulderModels.length)], x, -0.06 * r, z, rng() * 6.28, r * 1.12, 0.85 + rng() * 0.5, new Color(1, 1, 1).multiplyScalar(0.75 + rng() * 0.4), 0.25);
+      else boulders.push({ m: new Matrix4().compose(p.set(x, r * 0.25, z), q, s.set(r * (0.9 + rng() * 0.4), r * (0.6 + rng() * 0.4), r)), c: tint() });
       if (r > 0.36) grid.obstacles.push({ x, z, r: r * 0.85 });
     }
     // колонный зал: столбы по неровной решётке
@@ -234,7 +278,7 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
         grid.obstacles.push({ x: cx, z: cz, r: 0.56 * k });
       }
     }
-    if (rng() < 0.22) {
+    if (rng() < 0.22 && roomEdge(i + 0.5, j + 0.5) < 0) {
       const sc = 0.025 + rng() * rng() * 0.07;
       e.set(rng() * 6.28, rng() * 6.28, rng() * 6.28); q.setFromEuler(e);
       pebbles.push({ m: new Matrix4().compose(p.set(i + rng(), sc * 0.3 + 0.02, j + rng()), q, s.set(sc * (1 + rng()), sc, sc * (1 + rng()))), c: tint() });
@@ -282,27 +326,56 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
       if (roll < 0.05) {
         const k = 0.42 + rng() * 0.3;
         e.set(0, rng() * 6.28, 0); q.setFromEuler(e);
-        crates.push({ m: new Matrix4().compose(p.set(x, k / 2, z), q, s.set(k, k, k)), c: wood() });
-        if (rng() < 0.35) crates.push({ m: new Matrix4().compose(p.set(x + 0.1, k + k * 0.35, z - 0.05), q, s.set(k * 0.7, k * 0.7, k * 0.7)), c: wood() });
+        const crate = ART.models[rng() < 0.5 ? 'wooden_crate_01' : 'wooden_crate_02'];
+        if (crate) place(crate, x, 0, z, rng() * 6.28, k * 0.8, 1, wood());
+        else {
+          crates.push({ m: new Matrix4().compose(p.set(x, k / 2, z), q, s.set(k, k, k)), c: wood() });
+          if (rng() < 0.35) crates.push({ m: new Matrix4().compose(p.set(x + 0.1, k + k * 0.35, z - 0.05), q, s.set(k * 0.7, k * 0.7, k * 0.7)), c: wood() });
+        }
         grid.obstacles.push({ x, z, r: k * 0.62 });
       } else if (roll < 0.075) {
         const k = 0.5 + rng() * 0.2, tip = rng() < 0.3;
         e.set(tip ? Math.PI / 2 : 0, rng() * 6.28, 0); q.setFromEuler(e);
-        barrels.push({ m: new Matrix4().compose(p.set(x, tip ? k * 0.5 : k * 0.55, z), q, s.set(k, k * 1.1, k)), c: wood() });
+        const barrel = ART.models.wine_barrel_01;
+        if (barrel && !tip) place(barrel, x, 0, z, rng() * 6.28, k * 0.55, 1, wood());
+        else barrels.push({ m: new Matrix4().compose(p.set(x, tip ? k * 0.5 : k * 0.55, z), q, s.set(k, k * 1.1, k)), c: wood() });
         grid.obstacles.push({ x, z, r: k * 0.55 });
       }
     }
-    if (kind === 'mine' && rng() < 0.03) {
+    if (kind === 'mine' && wd < 1.1 && wd > 0.55 && clear(x, z, 1.4)) {
+      const roll = rng(), tool = roll < 0.012 ? ART.models.wooden_ladder : roll < 0.024 ? ART.models.picke_dirty_01 : roll < 0.04 ? ART.models.wooden_bucket_01 : undefined;
+      if (tool) {
+        const small = tool === ART.models.wooden_bucket_01;
+        place(tool, x, 0, z, rng() * 6.28, small ? 0.2 : 0.48, 1, wood());
+        if (!small) grid.obstacles.push({ x, z, r: 0.3 });
+      }
+    }
+    if (kind === 'mine' && rng() < 0.03 && !reserved(x, z)) {
       e.set(0, rng() * 6.28, (rng() - 0.5) * 0.1); q.setFromEuler(e);
       planks.push({ m: new Matrix4().compose(p.set(x, 0.05, z), q, s.set(0.6 + rng() * 0.6, 1, 1)), c: wood() });
     }
     // россыпь щебня: несколько камней кучкой
-    if (rng() < (kind === 'rubble' || kind === 'void' ? 0.045 : 0.02)) {
+    if (rng() < (kind === 'rubble' || kind === 'void' ? 0.045 : 0.02) && !reserved(x, z)) {
       const n = 3 + Math.floor(rng() * 5);
       for (let k = 0; k < n; k++) {
         const sc = 0.06 + rng() * 0.15, an = rng() * 6.28, rr = rng() * 0.55;
         e.set(rng() * 6.28, rng() * 6.28, rng() * 6.28); q.setFromEuler(e);
         rubble.push({ m: new Matrix4().compose(p.set(x + Math.cos(an) * rr, sc * 0.35, z + Math.sin(an) * rr), q, s.set(sc * (1 + rng() * 0.6), sc * 0.7, sc)), c: tint() });
+      }
+    }
+  }
+
+  // завал над лазом: сломанная крепь поперёк и глыбы по краям — ползёшь под ними
+  for (const t of crawls) for (let k = 0; k < t.pts.length - 1; k++) {
+    const [ax, az] = t.pts[k], [bx, bz] = t.pts[k + 1];
+    const len = Math.hypot(bx - ax, bz - az), ux = (bx - ax) / len, uz = (bz - az) / len, ry = Math.atan2(-uz, ux) + Math.PI / 2;
+    for (let d = 0.5; d < len; d += 0.8) {
+      const x = ax + ux * d, z = az + uz * d;
+      e.set((rng() - 0.5) * 0.25, ry + (rng() - 0.5) * 0.7, (rng() - 0.5) * 0.3); q.setFromEuler(e);
+      planks.push({ m: new Matrix4().compose(p.set(x + (rng() - 0.5) * 0.3, 1.02 + rng() * 0.22, z + (rng() - 0.5) * 0.3), q, s.set(1.5 + rng() * 0.5, 2.2, 1.3)), c: wood() });
+      for (const side of [-1, 1]) if (boulderModels.length && rng() < 0.75) {
+        const off = 1.25 + rng() * 0.7, r = 0.5 + rng() * 0.55;
+        place(boulderModels[Math.floor(rng() * boulderModels.length)], x - uz * off * side, 0.5 + rng() * 0.5, z + ux * off * side, rng() * 6.28, r, 0.9 + rng() * 0.4, new Color(1, 1, 1).multiplyScalar(0.75 + rng() * 0.4), 0.5);
       }
     }
   }
@@ -324,6 +397,12 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
       trash.push(im);
     }
   };
+  const modelMats = new Map<MeshStandardMaterial, MeshStandardMaterial>();
+  for (const [m, list] of modelInst) for (const part of m.parts) {
+    let mat = modelMats.get(part.mat);
+    if (!mat) { mat = darkify(part.mat.clone(), true); modelMats.set(part.mat, mat); trash.push(mat); }
+    add(part.geo, mat, list);
+  }
   add(boulderGeo, rockMat, boulders); add(spikeGeo, rockMat, spikes); add(colGeo, rockMat, columns);
   add(pebbleGeo, rockMat, pebbles); add(boneGeo, boneMat, bones, false);
   add(pebbleGeo, rockMat, rubble); add(lampGeo, ironMat, deadLamps, false);
@@ -338,7 +417,7 @@ export function buildCave(grid: Grid, style: Style, def: LevelDef): Cave {
     return m;
   };
   for (const cv of def.carves) {
-    if (cv.kind !== 'mine' || cv.r > 2.6 || cv.pts.length < 2) continue;
+    if (cv.kind !== 'mine' || cv.r > 2.6 || cv.r < 1.5 || cv.pts.length < 2) continue;      // в лазах и дверных ходах крепи нет
     for (let k = 0; k < cv.pts.length - 1; k++) {
       const [ax, az] = cv.pts[k], [bx, bz] = cv.pts[k + 1];
       const len = Math.hypot(bx - ax, bz - az), ux = (bx - ax) / len, uz = (bz - az) / len;

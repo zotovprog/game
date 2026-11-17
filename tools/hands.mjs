@@ -94,7 +94,7 @@ await page.goto(q('skip=1'));
 await page.waitForFunction('window.__GAME__?.ready', null, { timeout: 120000 });
 ok('cave remembers the lit brazier', await D(`${G}.braziers[0].f.lit === true && ${G}.braziers[0].kept === true && ${G}.braziers[1].f.lit === false`));
 // 7) тьма за спиной: доходит до огня, давит, гасит; догнала — пьёт огонь
-await D(`(() => { const g = ${G}, b = g.braziers[0]; g.flags.add('firstDark'); g.wind.t = 999; g.lamp.oil = 95; window.__GAME__.tp(150, 178.8); g.tide.on = true; g.tide.f = b.flow + 12; })()`);
+await D(`(() => { const g = ${G}, b = g.braziers[0]; g.flags.add('firstDark'); g.wind.t = 999; g.lamp.oil = 95; window.__GAME__.tp(145, 176.8); g.tide.on = true; g.tide.f = b.flow + 12; })()`);
 ok('living fire holds the dark', await until(`${G}.braziers[0].life < 53 && ${G}.braziers[0].f.lit`, 240), 'f ' + (await D(`${G}.tide.f.toFixed(0) + ' vs fire ' + ${G}.braziers[0].flow`)));
 await D(`${G}.braziers[0].life = 3`);
 ok('the dark puts the fire out', await until(`${G}.braziers[0].dead && !${G}.braziers[0].f.lit`, 240));

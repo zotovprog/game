@@ -32,7 +32,9 @@ export class Human {
   shield = 0;
   /** 0..1 — доливает масло или разжигает: свободная рука у лампы */
   pour = 0;
-  private talkK = 0; private shieldK = 0; private pourK = 0;
+  /** 0..1 — ползёт под завалом; 0..1 — протискивается боком в щели */
+  crawl = 0; squeeze = 0;
+  private talkK = 0; private shieldK = 0; private pourK = 0; private crawlK = 0; private squeezeK = 0;
 
   constructor(opts: HumanOpts) {
     const cloakMat = darkify(new MeshStandardMaterial({ color: opts.cloak, roughness: 1, flatShading: true }));
@@ -100,8 +102,10 @@ export class Human {
     this.walk = damp(this.walk, speed01, 10, dt);
     this.poseK = damp(this.poseK, this.pose === 'sit' ? 1 : 0, 4, dt);
     this.lieK = damp(this.lieK, this.pose === 'lie' ? 1 : 0, 2.6, dt);
-    this.root.rotation.x = -1.46 * this.lieK;
-    this.root.position.y = 0.14 * this.lieK - 1.55 * this.sink;
+    this.crawlK = damp(this.crawlK, this.crawl, 6, dt); this.squeezeK = damp(this.squeezeK, this.squeeze, 6, dt);
+    this.root.rotation.x = -1.46 * this.lieK + 1.1 * this.crawlK;                     // ползком: тело ложится вперёд
+    this.root.position.y = 0.14 * this.lieK - 1.55 * this.sink + 0.16 * this.crawlK;
+    this.body.rotation.y = 1.2 * this.squeezeK;                                      // в щели — боком
     this.root.rotation.z = 0.5 * this.sink;
     this.phase += dt * (5.2 + 4.5 * this.walk) * (this.walk > 0.02 ? 1 : 0);
     const w = this.walk, s = Math.sin(this.phase), k = this.poseK;

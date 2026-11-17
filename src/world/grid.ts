@@ -2,9 +2,10 @@
 import { fbm } from '../core/rng';
 
 /** Характер места: от него зависят стены, пол и то, что там стоит. */
-export type Kind = 'rubble' | 'mine' | 'columns' | 'water' | 'void' | 'fissure' | 'gate';
-export const KINDS: Kind[] = ['rubble', 'mine', 'columns', 'water', 'void', 'fissure', 'gate'];
-export interface Carve { pts: [number, number][]; r: number; kind?: Kind }
+export type Kind = 'rubble' | 'mine' | 'columns' | 'water' | 'void' | 'fissure' | 'gate' | 'room';
+export const KINDS: Kind[] = ['rubble', 'mine', 'columns', 'water', 'void', 'fissure', 'gate', 'room'];
+/** Полость: кисть r вдоль ломаной pts, либо прямоугольник rect [x0, z0, x1, z1] (комната). rough — насколько край изъеден (1 — пещера, 0 — ровно). */
+export interface Carve { pts: [number, number][]; r: number; kind?: Kind; rect?: [number, number, number, number]; rough?: number }
 export interface Obstacle { x: number; z: number; r: number }
 
 export class Grid {
@@ -21,15 +22,16 @@ export class Grid {
     for (let j = 1; j < h - 1; j++) {
       for (let i = 1; i < w - 1; i++) {
         const x = i + 0.5, z = j + 0.5;
-        let d = 1e9, kind = 0;
+        let d = 1e9, kind = 0, open = false;
+        const rough = (fbm(x * 0.33, z * 0.33, seed, 3) - 0.5) * 1.7;
         for (const c of carves) {
-          const dc = distPolyline(x, z, c.pts) - c.r;
+          const dc = c.rect ? distRect(x, z, c.rect) : distPolyline(x, z, c.pts) - c.r;
           if (dc < d) { d = dc; kind = KINDS.indexOf(c.kind ?? 'rubble'); }
+          if (dc + rough * (c.rough ?? 1) < 0) open = true;
         }
         if (d > 6) continue;
         this.kinds[j * w + i] = kind;
-        const rough = (fbm(x * 0.33, z * 0.33, seed, 3) - 0.5) * 1.7;
-        if (d + rough < 0) this.cells[j * w + i] = 1;
+        if (open) this.cells[j * w + i] = 1;
       }
     }
     for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
@@ -151,6 +153,12 @@ export class Grid {
       }
     }
   }
+}
+
+/** Знаковое расстояние до прямоугольника [x0, z0, x1, z1]: внутри — минус. */
+export function distRect(x: number, z: number, r: [number, number, number, number]): number {
+  const dx = Math.max(r[0] - x, x - r[2]), dz = Math.max(r[1] - z, z - r[3]);
+  return dx <= 0 && dz <= 0 ? Math.max(dx, dz) : Math.hypot(Math.max(dx, 0), Math.max(dz, 0));
 }
 
 export function distPolyline(x: number, z: number, pts: [number, number][]): number {

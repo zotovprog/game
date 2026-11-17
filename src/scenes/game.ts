@@ -10,6 +10,7 @@ import { TX } from '../data/texts';
 import { T } from '../data/tuning';
 import { Darkness, DarkWorld, SafeLight } from '../systems/dark';
 import { Forsaken } from '../systems/forsaken';
+import { Halls } from '../systems/halls';
 import { Pace } from '../systems/pace';
 import { Phantoms } from '../systems/phantoms';
 import { addOil, fanStep, fanZone, feed, flamePower, isDead, knockFlame, LampState, lightRadius, needsFan, newLamp, stepLamp } from '../systems/lamp';
@@ -85,6 +86,8 @@ export class Game {
   /** темп: ступени пробуждения тьмы и паузы между событиями */
   readonly pace = new Pace();
   readonly phantoms: Phantoms;
+  /** залы памяти: двери, чаши, статуя, теснины */
+  readonly halls: Halls;
   private shadeEyes: { x: number; z: number } | null = null;
   readonly forsaken: Forsaken;
   mode: Mode = 'menu';
@@ -300,6 +303,7 @@ export class Game {
     scene.add(this.draft.mesh);
     darkU.uSwallow.value.set(0, 0, 0, 0);
     this.forsaken = new Forsaken(this);
+    this.halls = new Halls(this);
     this.story = new Story(this);
     // озвучка: кто это сказал → чей голос; где он стоит → с какой стороны слышно
     const roles: Record<string, string> = {
@@ -396,7 +400,7 @@ export class Game {
     }
     const l = Math.hypot(dx, dz);
     const wading = this.grid.kindAt(this.pos.x, this.pos.z) === 'water' && this.grid.wallDist(this.pos.x, this.pos.z) > 1.1;
-    const sp = T.player.speed * (this.autoWalk ? 0.6 : 1) * (this.lamp.held ? 1 : 0.6) * (this.carrying ? T.player.carry : 1) * (wading ? T.player.wade : 1) * (1 - (1 - T.lamp.shieldSpeed) * this.lamp.shield);
+    const sp = T.player.speed * (this.autoWalk ? 0.6 : 1) * (this.lamp.held ? 1 : 0.6) * (this.carrying ? T.player.carry : 1) * (wading ? T.player.wade : 1) * (1 - (1 - T.lamp.shieldSpeed) * this.lamp.shield) * this.halls.speedK;
     if (l > 0.01) {
       this.pos.x += dx * sp * dt; this.pos.z += dz * sp * dt;
       this.grid.collide(this.pos, T.player.radius);
@@ -451,7 +455,8 @@ export class Game {
       k++;
       if (n.grab > 0.03 && n.out > 0) { n.speed01 = 0; continue; }          // тьма держит: сам не выйдет
       const kind = this.grid.kindAt(n.x, n.z);
-      const slow = n.pace * (kind === 'water' ? T.party.wade : kind === 'fissure' ? T.party.squeeze : 1);
+      [n.h.crawl, n.h.squeeze] = this.halls.poseAt(n.x, n.z);
+      const slow = (n.h.crawl ? T.hall.crawlSpeed * 1.25 : 1) * n.pace * (kind === 'water' ? T.party.wade : kind === 'fissure' ? T.party.squeeze : 1);
       const [tx, tz] = this.trail(T.party.spacing * k);
       if (this.dist(n.x, n.z) > 1.25 * k) walkTo(n, tx, tz, T.player.speed * 1.06 * slow); else n.speed01 = 0;
     }
@@ -584,7 +589,7 @@ export class Game {
     const hf = this.grid.flowAt(this.pos.x, this.pos.z);
     if (hf >= 65535) return;
     // огни, до которых она дошла, гаснут не сразу: давит, они тускнеют — и держат её
-    let held = false;
+    let held = this.halls.holdTide;                            // пока решаешь загадку, она ждёт
     for (const b of this.braziers) {
       if (b.dead) continue;
       if (tide.f > b.flow + Td.band) continue;                 // ещё не дошла
@@ -719,6 +724,7 @@ export class Game {
       if (this.shade.state === 'wait') near(this.shade.x, this.shade.z, 3.4, TX.promptTalk, () => s.talkShade());
       if (!this.toy.taken) near(this.toy.x, this.toy.z, 1.3, TX.promptToy, () => s.pickToy());
       near(this.bowl.x, this.bowl.z, 1.9, TX.bowl.prompt, () => s.bowl());
+      this.halls.prompts(near);
       const followers = this.companions.some((c) => c.state === 'follow');
       const fires: [Fire, number, number][] = [[this.family.fire, this.family.x, this.family.z], ...this.braziers.map((b): [Fire, number, number] => [b.f, b.x, b.z])];
       for (const [fr, fx, fz] of fires) {
@@ -797,7 +803,7 @@ export class Game {
 
     // руки: прикрыть огонь ладонью (держать), раздуть сбитое пламя (держать тягу в полосе). С ребёнком на руках ладонь занята.
     const hands = live && lamp.held;
-    lamp.shield = damp(lamp.shield, hands && !this.carrying && this.input.down('ShiftLeft', 'ShiftRight', 'KeyC') ? 1 : 0, 9, dt);
+    lamp.shield = damp(lamp.shield, hands && !this.carrying && !this.halls.handsBusy && this.input.down('ShiftLeft', 'ShiftRight', 'KeyC') ? 1 : 0, 9, dt);
     const still = hands && this.speed01 < 0.05, holdR = this.input.down('KeyR');
     const fanning = needsFan(lamp);
     if (hands || !fanning) {
@@ -832,7 +838,7 @@ export class Game {
     if (lamp.held && wasOil > T.lamp.lowOil && lamp.oil <= T.lamp.lowOil) hud.hint(TX.oilLow, 4);
     if (lamp.held && wasOil > 0 && lamp.oil <= 0) { hud.hint(TX.ember, 4); this.sfx.snuff(); }
     // гибель: пламя вспыхивает напоследок — видно, как языки сходятся и хватают, — и тьма сдавливает свет до точки
-    const rTarget = this.dying ? lerp(T.death.flare, 0.2, smooth(T.death.grab * 0.7, T.death.fadeFrom, this.dying.t)) : lamp.held ? lightRadius(lamp) : 2.3;
+    const rTarget = this.dying ? lerp(T.death.flare, 0.2, smooth(T.death.grab * 0.7, T.death.fadeFrom, this.dying.t)) : lamp.held ? lightRadius(lamp) * this.halls.lightK : 2.3;
     this.radius = damp(this.radius, rTarget, this.dying ? 9 : rTarget < this.radius ? 3 : 6, dt);
     const power = this.dying ? Math.max(0.05, 0.75 * (1 - smooth(T.death.grab, T.death.fadeFrom, this.dying.t))) : lamp.held ? flamePower(lamp) : 0.16;
     {
@@ -843,6 +849,9 @@ export class Game {
     this.lantern.group.getWorldPosition(this.lampWorld);
 
     if (live) { this.interact(); this.party(dt); this.story.zones(); this.story.wisps(); this.story.drama(dt); this.forsaken.update(dt, t); } else hud.prompt(null);
+    this.hero.crawl = this.halls.crawl; this.hero.squeeze = this.halls.squeeze;
+    if (this.halls.handsBusy) this.pace.hush(2.5);             // в теснине руки заняты: ни ветра, ни броска — только страх
+    this.halls.update(dt, t);
 
     // огни мира
     beginDarkLights(); this.pool.begin();
@@ -867,6 +876,7 @@ export class Game {
       const cm = b.coal.material as SpriteMaterial;
       cm.opacity = damp(cm.opacity, glow, 3, dt); b.coal.visible = cm.opacity > 0.01;
     }
+    for (const b of this.halls.fires) { b.f.strength = 0.62; fire(b.f, b.x, b.z); }      // чаши в залах: тоже живой огонь
     // от жаровни до жаровни: у живого огня твой огонёк разгорается заново
     if (feeding && live && lamp.held && (lamp.oil > 0 || !lamp.lit)) { if (!this.feeding && lamp.oil < 90) this.sfx.relight(); feed(lamp, dt); }
     this.feeding = feeding;

@@ -64,7 +64,7 @@ export class Fire {
     this.glow = makeGlow(style.fire, 2.2, 0.9);
     this.glow.position.y = fy + 0.25;
     this.group.add(this.embers, this.glow);
-    this.emitter = { x: 0, y: 0, z: 0, color: style.fire, intensity: 0, distance: 10 };
+    this.emitter = { x: 0, y: 0, z: 0, color: style.fireLight, intensity: 0, distance: 10 };
     this.update(0, 0);
   }
 

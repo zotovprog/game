@@ -1,6 +1,6 @@
 // «Живая тьма»: вшивается в материалы мира. Всё, до чего не дотягивается ни один источник
 // света, уходит в чёрное; граница изъедена шумом, который ползёт внутрь круга.
-import { Material, Vector2, Vector3, Vector4 } from 'three';
+import { Material, Texture, Vector2, Vector3, Vector4 } from 'three';
 
 export const DARK_MAX = 12;
 export const TEND_MAX = 6;
@@ -35,6 +35,11 @@ uniform float uTime; uniform vec4 uLights[DARK_MAX]; uniform int uLightCount;
 uniform float uEdgeNoise; uniform vec2 uHeight;
 uniform vec3 uCutPos; uniform vec3 uCutDir; uniform float uCutR; uniform vec4 uSwallow;
 varying vec3 vDarkPos;
+#ifdef DARK_TRI
+uniform sampler2D uTriWallC, uTriWallN, uTriGroundC, uTriGroundN;
+uniform vec4 uTri;                 // плиток на метр: стена, пол; яркость; сила рельефа
+varying vec3 vTriN;
+#endif
 ${NOISE}
 #ifdef DARK_ROCK
 vec3 rockDetail(vec3 col, vec3 p){
@@ -125,15 +130,47 @@ if (dkD > dkFar() || vDarkPos.y > uHeight.y) { gl_FragColor = vec4(0.0, 0.0, 0.0
 #ifdef DARK_ROCK
   diffuseColor.rgb = rockDetail(diffuseColor.rgb, vDarkPos);
 #endif
+#ifdef DARK_TRI
+  // настоящая фактура: три проекции по осям мира, стена и пол — разные текстуры
+  vec3 triN = normalize(vTriN);
+  vec3 triW = pow(abs(triN), vec3(4.0)); triW /= (triW.x + triW.y + triW.z);
+  vec3 triP = vDarkPos * uTri.x;
+  vec2 triG = vDarkPos.xz * uTri.y;
+  diffuseColor.rgb *= (texture2D(uTriWallC, triP.zy).rgb * triW.x + texture2D(uTriGroundC, triG).rgb * triW.y + texture2D(uTriWallC, triP.xy).rgb * triW.z) * uTri.z;
+#endif
+`;
+
+/** Рельеф из карт нормалей тех же трёх проекций. */
+const TRI_NORMAL = /* glsl */ `
+#ifdef DARK_TRI
+{
+  vec3 tnx = texture2D(uTriWallN, triP.zy).xyz * 2.0 - 1.0;
+  vec3 tny = texture2D(uTriGroundN, triG).xyz * 2.0 - 1.0;
+  vec3 tnz = texture2D(uTriWallN, triP.xy).xyz * 2.0 - 1.0;
+  tnx.xy *= uTri.w; tny.xy *= uTri.w; tnz.xy *= uTri.w;
+  tnx = vec3(tnx.xy + triN.zy, abs(tnx.z) * triN.x);
+  tny = vec3(tny.xy + triN.xz, abs(tny.z) * triN.y);
+  tnz = vec3(tnz.xy + triN.xy, abs(tnz.z) * triN.z);
+  vec3 triWN = normalize(tnx.zyx * triW.x + tny.xzy * triW.y + tnz.xyz * triW.z);
+  normal = normalize((viewMatrix * vec4(triWN, 0.0)).xyz);
+}
+#endif
 `;
 
 /** Подключает тьму к стандартному материалу. cut — вырез вокруг героя (для стен). */
-/** cut — вырез вокруг героя (стены); tall — без затухания по высоте (Врата); rock — фактура камня. */
-export function darkify<T extends Material>(mat: T, cut = false, tall = false, rock = false): T {
+/** cut — вырез вокруг героя (стены); tall — без затухания по высоте (Врата); rock — фактура камня шумом; tri — фактура из текстур. */
+export interface Tri { wallC: Texture; wallN: Texture; groundC: Texture; groundN: Texture; wall: number; ground: number; gain: number; bump: number }
+let triId = 0;
+export function darkify<T extends Material>(mat: T, cut = false, tall = false, rock = false, tri?: Tri): T {
+  const triKey = tri ? `-tri${++triId}` : '';
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, darkU);
+    if (tri) Object.assign(shader.uniforms, {
+      uTriWallC: { value: tri.wallC }, uTriWallN: { value: tri.wallN }, uTriGroundC: { value: tri.groundC }, uTriGroundN: { value: tri.groundN },
+      uTri: { value: new Vector4(tri.wall, tri.ground, tri.gain, tri.bump) },
+    });
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vDarkPos;')
+      .replace('#include <common>', `#include <common>\nvarying vec3 vDarkPos;${tri ? '\n#define DARK_TRI\nvarying vec3 vTriN;' : ''}`)
       .replace(
         '#include <project_vertex>',
         `#include <project_vertex>
@@ -141,15 +178,23 @@ export function darkify<T extends Material>(mat: T, cut = false, tall = false, r
         #ifdef USE_INSTANCING
           dkP = instanceMatrix * dkP;
         #endif
-        vDarkPos = (modelMatrix * dkP).xyz;`,
+        vDarkPos = (modelMatrix * dkP).xyz;
+        #ifdef DARK_TRI
+          vec3 dkN = objectNormal;
+          #ifdef USE_INSTANCING
+            dkN = mat3(instanceMatrix) * dkN;
+          #endif
+          vTriN = normalize(mat3(modelMatrix) * dkN);
+        #endif`,
       );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${cut ? '#define DARK_CUT\n' : ''}${tall ? '#define DARK_TALL\n' : ''}${rock ? '#define DARK_ROCK\n' : ''}${FRAG_HEAD}`)
+      .replace('#include <common>', `#include <common>\n${cut ? '#define DARK_CUT\n' : ''}${tall ? '#define DARK_TALL\n' : ''}${rock ? '#define DARK_ROCK\n' : ''}${tri ? '#define DARK_TRI\n' : ''}${FRAG_HEAD}`)
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\n${CUT}`)
       .replace('#include <color_fragment>', `#include <color_fragment>\n${EARLY}`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${TRI_NORMAL}`)
       .replace('#include <dithering_fragment>', 'gl_FragColor.rgb = darkApply(gl_FragColor.rgb, vDarkPos);\n#include <dithering_fragment>');
   };
-  mat.customProgramCacheKey = () => `dark${cut ? '-cut' : ''}${tall ? '-tall' : ''}${rock ? '-rock' : ''}`;
+  mat.customProgramCacheKey = () => `dark${cut ? '-cut' : ''}${tall ? '-tall' : ''}${rock ? '-rock' : ''}${triKey}`;
   return mat;
 }
 

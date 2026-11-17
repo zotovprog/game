@@ -12,6 +12,7 @@ import { addOil } from './systems/lamp';
 import { onRestart, savedPoint } from './systems/story';
 import { mountDebug } from './ui/debug';
 import { Hud } from './ui/hud';
+import { ART, loadArt } from './view/art';
 import { Stage } from './view/stage';
 
 declare global {
@@ -59,6 +60,13 @@ function boot(autostart: boolean): void {
   }
   if (window.__GAME__) window.__GAME__.game = game;
 }
+// детальные текстуры и модели: ждём недолго; не пришли — играем с прежним видом
+const loading = document.createElement('div');
+loading.className = 'loading'; loading.textContent = 'Пещера вспоминает…';
+ui.append(loading);
+// (страница, открытая файлом, сетью не пользуется — там прежний вид)
+if (location.protocol !== 'file:') await Promise.race([loadArt('art/', (d, n) => { loading.style.setProperty('--p', String(d / n)); }), new Promise((r) => setTimeout(r, 12000))]);
+(window as unknown as { __art: unknown }).__art = { tex: Object.keys(ART.tex).length, models: Object.keys(ART.models).length, missing: ART.failed };
 boot(false);
 onRestart(() => boot(true));
 
