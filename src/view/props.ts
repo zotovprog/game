@@ -17,6 +17,8 @@ export class Fire {
   private embers: Sprite;
   private fy: number;
   k = 0;                      // 0..1 — насколько разгорелся
+  strength = 1;               // 0..1 — сколько в нём осталось, когда на него давит тьма
+  lean = { x: 0, z: 0 };      // сквозняк клонит пламя (в осях мира)
   lit = false;
   readonly emitter: Emitter;
 
@@ -67,13 +69,13 @@ export class Fire {
   }
 
   update(t: number, dt: number): void {
-    this.k += ((this.lit ? 1 : 0) - this.k) * Math.min(1, dt * 2.2);
+    this.k += ((this.lit ? this.strength : 0) - this.k) * Math.min(1, dt * 2.2);
     const k = this.k;
     this.flames.forEach((f, i) => {
       f.visible = k > 0.02;
       const n = vnoise(t * 6 + i * 3.7, i);
       f.scale.set(k * (0.7 + n * 0.5), k * (0.7 + n * 1.1), k * (0.7 + n * 0.5));
-      f.rotation.y = t * (1 + i * 0.3);
+      f.rotation.set(this.lean.z * 0.5, t * (1 + i * 0.3), -this.lean.x * 0.5);          // клонится по сквозняку
     });
     const fl = 0.85 + vnoise(t * 8.1, 3) * 0.3;
     (this.glow.material as { opacity: number }).opacity = k * fl;

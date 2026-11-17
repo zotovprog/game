@@ -20,23 +20,8 @@ html, body { margin: 0; height: 100%; background: var(--void); overflow: hidden;
 #mark::after { content: ''; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px; border-radius: 50%;
   background: rgba(233, 223, 198, 0.2); border: 1px solid var(--bone-mid); transform: translate(var(--dx, 0px), var(--dy, 0px)); }
 
-/* склянка масла — вверху слева, вне пальцев */
-#oil { left: max(18px, env(safe-area-inset-left, 0px)); top: max(18px, env(safe-area-inset-top, 0px)); width: 9px; height: 62px;
-  border: 1px solid var(--line); border-radius: 2px 2px 5px 5px; opacity: 0.85; }
-#oil i { position: absolute; left: 1px; right: 1px; bottom: 1px; background: var(--bone-hi); border-radius: 1px 1px 4px 4px;
-  box-shadow: 0 0 8px rgba(243, 234, 214, 0.5); transition: height 0.4s linear, background 0.6s; }
-#oil.low i { background: var(--ember); animation: pulse 0.9s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.35; } }
 
-/* цель: всегда наверху */
-#goal { top: max(14px, env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; white-space: nowrap;
-  font-family: var(--display); font-weight: 700; font-size: clamp(19px, 2.4vw, 24px); letter-spacing: 0.14em; color: var(--bone-mid); text-shadow: 0 0 10px var(--void), 0 0 3px var(--void); }
-#goal span b { color: var(--bone-hi); font-weight: 700; }
-#goal span u { text-decoration: none; color: var(--ember); }
-#goal i { width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 18px solid var(--bone-hi); filter: drop-shadow(0 0 6px rgba(243, 234, 214, 0.5)); transition: transform 0.4s; }
-@media (max-width: 620px) {
-  #goal { white-space: normal; text-align: center; max-width: calc(100vw - 124px); font-size: 17px; letter-spacing: 0.1em; line-height: 1.15; gap: 8px; }
-}
 /* метки направления */
 .mark { transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 3px; pointer-events: none;
   font-family: var(--display); font-weight: 700; font-size: 20px; letter-spacing: 0.16em; color: var(--bone-mid); text-shadow: 0 0 8px var(--void), 0 0 3px var(--void); animation: markin 0.4s ease-out; }
@@ -47,21 +32,21 @@ html, body { margin: 0; height: 100%; background: var(--void); overflow: hidden;
 @keyframes markin { from { opacity: 0; } }
 
 
-/* руки: склянка и ладонь — справа, под ползунком фитиля */
+/* руки: ладонь над пламенем; «раздуть» появляется, только когда пламя сбито */
 #hands { right: max(6px, env(safe-area-inset-right, 0px)); bottom: max(20px, calc(env(safe-area-inset-bottom, 0px) + 14px)); display: flex; flex-direction: column; gap: 12px; align-items: flex-end; }
 #hands button { position: relative; width: 66px; height: 66px; border-radius: 50%; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.5); color: var(--bone-hi);
   font-family: var(--display); font-weight: 700; pointer-events: auto; touch-action: none; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 0; }
 #hands button span { font-size: 13px; letter-spacing: 0.08em; color: var(--bone-mid); line-height: 1; }
 #hands button kbd { font-family: var(--text); font-size: 10px; color: var(--ash); position: absolute; top: -7px; right: -2px; background: var(--void); padding: 0 4px; border: 1px solid var(--line); border-radius: 3px; }
-/* склянка: кольцо показывает, сколько уже долито */
+#hands button[hidden] { display: none; }
+/* раздуть: кольцо показывает, сколько уже раздуто */
 #bPour { background: conic-gradient(rgba(233, 223, 198, 0.55) calc(var(--p, 0) * 360deg), rgba(0, 0, 0, 0.5) 0) !important; }
 #bPour::before { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: #070707; }
 #bPour > * { position: relative; }
-#bPour i { width: 9px; height: 15px; border: 1px solid var(--bone-mid); border-radius: 1px 1px 4px 4px; background: linear-gradient(to top, var(--bone-hi) 60%, transparent 60%); }
-#bPour b { font-size: 21px; line-height: 0.9; }
-#bPour.empty { opacity: 0.4; }
+#bPour i { width: 13px; height: 13px; margin: 4px 0 7px; border-radius: 0 60% 60% 60%; transform: rotate(45deg); background: radial-gradient(circle at 62% 62%, var(--bone-hi) 0 22%, var(--ember) 60%); box-shadow: 0 0 9px var(--ember); }
+#hands button.empty { opacity: 0.3; }
 #bPour.alert { border-color: var(--ember); animation: pulse 0.6s ease-in-out infinite; }
-#bPour.alert b, #bPour.alert span { color: var(--ember); }
+#bPour.alert span { color: var(--ember); }
 /* ладонь над пламенем */
 #bShield i { width: 26px; height: 13px; border: 1px solid var(--bone-mid); border-bottom: none; border-radius: 26px 26px 0 0; position: relative; margin-bottom: 3px; }
 #bShield i::after { content: ''; position: absolute; left: 50%; bottom: -3px; width: 5px; height: 8px; margin-left: -2.5px; border-radius: 50% 50% 40% 40%; background: var(--bone-hi); box-shadow: 0 0 6px var(--bone-hi); }

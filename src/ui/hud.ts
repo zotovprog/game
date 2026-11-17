@@ -14,8 +14,6 @@ export interface Choice { label: string; note?: string }
 export class Hud {
   readonly area = el('div', 'area');
   readonly mark = el('div', 'mark');
-  private oil = el('div', 'oil', 'fade hidden');
-  private oilFill = el('i');
   private hintEl = el('div', 'hint', 'fade hidden');
   private act = el('button', 'act', 'hidden');
   private dialog = el('div', 'dialog', 'hidden');
@@ -28,9 +26,6 @@ export class Hud {
   private bPour = el('button', 'bPour');
   private bShield = el('button', 'bShield');
   private nextBtn = el('button', '', 'next');
-  private goal = el('div', 'goal', 'fade hidden');
-  private goalText = el('span');
-  private goalArrow = el('i');
   private marks = new Map<string, { el: HTMLElement; x: number; z: number; until: number }>();
   private overlay: HTMLElement | null = null;
   private hintTimer = 0;
@@ -45,14 +40,13 @@ export class Hud {
   onPause: (() => void) | null = null;
 
   constructor(private root: HTMLElement) {
-    this.oil.append(this.oilFill);
     this.nextBtn.textContent = TX.next;
     this.nextBtn.addEventListener('click', () => this.input.press('Space'));
     this.dialog.append(this.who, this.txt, this.nextBtn, this.opts);
-    // руки: склянка (держать — долить или разжечь) и ладонь (держать — прикрыть лампу)
-    this.bPour.innerHTML = '<i></i><b>0</b><kbd>R</kbd><span></span>';
+    // руки: раздуть сбитое пламя (кнопка есть, только когда надо) и ладонь (держать — прикрыть огонь)
+    this.bPour.innerHTML = '<i></i><kbd>R</kbd><span></span>';
     this.bShield.innerHTML = '<i></i><kbd>Shift</kbd><span></span>';
-    this.bPour.setAttribute('aria-label', TX.btnPour); this.bShield.setAttribute('aria-label', TX.btnShield);
+    this.bPour.setAttribute('aria-label', TX.btnFan); this.bShield.setAttribute('aria-label', TX.btnShield);
     this.hands.append(this.bPour, this.bShield);
     const holdBtn = (b: HTMLElement, code: string) => {
       b.addEventListener('pointerdown', (e) => { e.preventDefault(); try { b.setPointerCapture(e.pointerId); } catch { /* палец уже отпущен */ } this.input.hold(code, true); });
@@ -64,10 +58,9 @@ export class Hud {
     pauseBtn.textContent = '‖';
     pauseBtn.setAttribute('aria-label', TX.paused);
     pauseBtn.addEventListener('click', () => this.onPause?.());
-    this.goal.append(this.goalText, this.goalArrow);
     this.speak.innerHTML = '<i></i><i></i><i></i>';
     this.draft.innerHTML = `<div class="zone"></div><div class="cur"></div><div class="life"><i></i></div><span>${TX.fanLabel}</span>`;
-    root.append(this.area, this.mark, this.speak, this.oil, this.goal, this.hintEl, this.hands, this.draft, this.dialog, this.act, pauseBtn);
+    root.append(this.area, this.mark, this.speak, this.hintEl, this.hands, this.draft, this.dialog, this.act, pauseBtn);
     // во время разговора тап в любое место экрана — следующая реплика
     this.area.addEventListener('pointerdown', () => { if (this.onDone) this.input.press('Space'); });
     this.act.addEventListener('click', () => this.input.press('Space'));
@@ -94,7 +87,7 @@ export class Hud {
   /** Открыт ли диалог или выбор. */
   get busy(): boolean { return this.onDone !== null || this.onChoice !== null; }
 
-  showHud(on: boolean): void { this.oil.classList.toggle('hidden', !on); this.hands.classList.toggle('hidden', !on); if (!on) this.goal.classList.add('hidden'); }
+  showHud(on: boolean): void { this.hands.classList.toggle('hidden', !on); }
   /** Кнопки рук: сколько склянок, ход долива, горит ли лампа, прикрыта ли, идёт ли сквозняк. */
   /**
    * Раздувание: шкала тяги с живой полосой и огоньком. draft — где огонёк, c/w — центр и полуширина полосы (0..1),
@@ -113,26 +106,20 @@ export class Hud {
     (d.children[2] as HTMLElement).style.visibility = life > 0 ? 'visible' : 'hidden';
     lf.style.width = `${(life * 100).toFixed(1)}%`;
   }
-  /** fan — пламя надо раздувать: кнопка лампы становится «раздуть», кольцо показывает, насколько раздул. */
-  setHands(flasks: number, progress: number, fan: boolean, shielding: boolean, windy: boolean): void {
+  /** fan — пламя надо раздувать: появляется кнопка «раздуть», кольцо на ней показывает, насколько раздул. busy — ладонь занята (несёшь ребёнка). */
+  setHands(progress: number, fan: boolean, shielding: boolean, windy: boolean, busy: boolean): void {
     const p = this.bPour;
-    (p.children[1] as HTMLElement).textContent = fan ? '!' : String(flasks);
-    (p.lastChild as HTMLElement).textContent = fan ? TX.btnFan : TX.btnPour;
+    p.hidden = !fan;
+    (p.lastChild as HTMLElement).textContent = TX.btnFan;
     p.style.setProperty('--p', progress.toFixed(3));
-    p.classList.toggle('empty', !fan && flasks === 0);
     p.classList.toggle('alert', fan);
+    this.bShield.classList.toggle('empty', busy);
     (this.bShield.lastChild as HTMLElement).textContent = TX.btnShield;
     this.bShield.classList.toggle('on', shielding);
     this.bShield.classList.toggle('alert', windy && !shielding);
     this.hands.classList.toggle('away', this.busy);           // в разговоре руки заняты словами: кнопки не мешают тексту
   }
   /** Цель и прогресс: всегда на экране. angle — куда тянет сквозняк (рад, 0 — вверх экрана), null — нет стрелки. */
-  setGoal(html: string, angle: number | null): void {
-    if (this.goalText.innerHTML !== html) this.goalText.innerHTML = html;
-    this.goalArrow.style.display = angle === null ? 'none' : '';
-    if (angle !== null) this.goalArrow.style.transform = `rotate(${angle.toFixed(2)}rad)`;
-    this.goal.classList.remove('hidden');
-  }
   /** Метка на краю экрана (или над целью, если она в кадре): «голос», «масло», имя того, кого тащит тьма. */
   marker(id: string, x: number, z: number, label: string, secs: number, urgent = false): void {
     let m = this.marks.get(id);
@@ -160,10 +147,6 @@ export class Hud {
       m.el.classList.toggle('off', off);
       (m.el.firstChild as HTMLElement).style.transform = `rotate(${Math.atan2(sx - cx, -(sy - cy)).toFixed(2)}rad)`;
     }
-  }
-  setOil(oil: number, low: boolean): void {
-    this.oilFill.style.height = `${Math.max(0, Math.min(100, oil)) * 0.96}%`;
-    this.oil.classList.toggle('low', low);
   }
   hint(text: string, secs = 6): void {
     this.onEvent('hint', text);

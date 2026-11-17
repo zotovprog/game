@@ -1,4 +1,5 @@
-// Лампа — единственный ресурс: масло и круг света, который сжимается вместе с ним. Чистая логика без three.js.
+// Огонёк в руке — единственный ресурс. «oil» — его сила 0..100: тает сам, пополняется только у живого огня.
+// Круг света сжимается вместе с ним; погас — смерть. Чистая логика без three.js.
 import { T } from '../data/tuning';
 
 export interface LampState {
@@ -8,8 +9,7 @@ export interface LampState {
   snuff: number;      // 0..1 — внешнее «задувание» (порыв ветра), временно
   lit: boolean;       // false — пламя задуло: масло есть, а света нет, пока не разожжёшь
   shield: number;     // 0..1 — насколько лампа прикрыта ладонью
-  flasks: number;     // склянки в запасе
-  pour: number;       // 0..1 — ход долива
+  outT: number;       // секунд с тех пор, как пламя сбито до уголька
   falter: number;     // 0 — пламя в порядке; 1→0 — сбито ветром и гаснет
   draft: number;      // 0..1 — тяга: как сильно ты сейчас дуешь на огонь
   draftV: number;
@@ -18,7 +18,7 @@ export interface LampState {
   inZone: boolean;    // тяга сейчас в живой полосе
 }
 
-export const newLamp = (): LampState => ({ oil: T.lamp.startOil, held: false, ember: 0, snuff: 0, lit: true, shield: 0, flasks: T.lamp.startFlasks, pour: 0, falter: 0, draft: 0, draftV: 0, fan: 0, fanT: 0, inZone: false });
+export const newLamp = (): LampState => ({ oil: T.lamp.startOil, held: false, ember: 0, snuff: 0, lit: true, shield: 0, outT: 0, falter: 0, draft: 0, draftV: 0, fan: 0, fanT: 0, inZone: false });
 
 /** Расход масла в секунду. */
 export function burnRate(companions: number): number {   // companions — суммарная «нагрузка», может быть дробной
@@ -52,7 +52,7 @@ export function flamePower(s: LampState): number {
 /** mult — множитель расхода (на глубине тьма сама пьёт масло). */
 export function stepLamp(s: LampState, dt: number, companions: number, mult = 1): void {
   if (!s.held) return;
-  if (!s.lit && s.oil > 0) return;                 // задуло: масло не горит
+  if (!s.lit && s.oil > 0) { s.outT += dt; return; }   // сбит до уголька: не тает, но остывает
   if (s.oil > 0) {
     s.oil = Math.max(0, s.oil - burnRate(companions) * mult * dt);
     s.ember = 0;
@@ -69,17 +69,6 @@ export function addOil(s: LampState, amount: number): void {
 /** Долить из запаса (или разжечь, если задуло). Возвращает, что произошло за этот шаг. */
 /** Пламя сбито или лампа погасла (а масло есть): его надо раздувать. */
 export const needsFan = (s: LampState): boolean => s.oil > 0 && (s.falter > 0 || !s.lit);
-
-/** Долив: держать, стоя на месте, пока не дольётся. Сбитое или погасшее пламя сначала надо раздуть. */
-export function pourStep(s: LampState, dt: number, holding: boolean): 'none' | 'poured' {
-  const can = holding && !needsFan(s) && s.flasks > 0 && s.oil < 97;
-  if (!can) { s.pour = Math.max(0, s.pour - dt * 2.5); return 'none'; }
-  s.pour += dt / T.lamp.pourTime;
-  if (s.pour < 1) return 'none';
-  s.pour = 0;
-  s.flasks--; addOil(s, T.lamp.flask);
-  return 'poured';
-}
 
 /** Где сейчас «живая» полоса тяги (центр и полуширина, в долях шкалы). На глубине она уже. */
 export function fanZone(t: number, dread: number): { c: number; w: number } {
@@ -106,16 +95,24 @@ export function fanStep(s: LampState, dt: number, blowing: boolean, dread: numbe
   s.fan = s.inZone ? s.fan + dt / (s.lit ? F.save : F.relight) : Math.max(0, s.fan - dt * F.leak);
   if (!s.lit) {
     if (s.fan < 1) return 'none';
-    s.lit = true; s.fan = 0; s.falter = 0; s.oil = Math.max(1, s.oil - T.lamp.relightCost);
+    s.lit = true; s.fan = 0; s.falter = 0; s.outT = 0; s.oil = Math.max(1, s.oil - T.lamp.relightCost);
     return 'relit';
   }
   if (!s.inZone) s.falter -= (dt / F.falterTime) * (1 + F.dreadRush * dread);
   if (s.fan >= 1) { s.falter = 0; s.fan = 0; return 'saved'; }
-  if (s.falter <= 0) { s.falter = 0; s.lit = false; s.fan = 0; return 'out'; }
+  if (s.falter <= 0) { s.falter = 0; s.lit = false; s.fan = 0; s.outT = 0; return 'out'; }
   return 'none';
 }
 
 /** Порыв сбил пламя (или добил уже сбитое). */
-export function knockFlame(s: LampState): void { s.falter = s.falter > 0 ? Math.max(0.05, s.falter - T.fan.hitAgain) : 1; s.pour = 0; }
+export function knockFlame(s: LampState): void { s.falter = s.falter > 0 ? Math.max(0.05, s.falter - T.fan.hitAgain) : 1; }
 
-export const isDead = (s: LampState): boolean => s.held && s.oil <= 0 && s.ember >= T.lamp.emberTime;
+/** Огонь погас совсем: догорел или уголёк остыл. */
+export const isDead = (s: LampState): boolean => s.held && ((s.oil <= 0 && s.ember >= T.lamp.emberTime) || (!s.lit && s.outT >= T.lamp.outLife));
+
+/** У живого огня (жаровня, костёр) огонёк разгорается; уголёк вспыхивает сразу. */
+export function feed(s: LampState, dt: number): void {
+  if (!s.held) return;
+  if (!s.lit || s.falter > 0) { s.lit = true; s.falter = 0; s.fan = 0; s.outT = 0; }
+  addOil(s, T.lamp.feed * dt);
+}

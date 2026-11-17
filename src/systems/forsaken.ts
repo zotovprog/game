@@ -19,12 +19,14 @@ interface Case {
   alone: number;                               // сколько секунд они уже одни в темноте
   ghosts: Ghost[]; bones: Group[];
   callT: number; seen: boolean; calls: number; warned: boolean;
+  flow: number;                                // шагов до Врат: когда тьма за спиной дойдёт сюда
+  passed: boolean;                             // тьма уже прошла это место
 }
 
 export class Forsaken {
   readonly cases: Case[];
   constructor(private g: Game) {
-    const mk = (id: Who, x: number, z: number): Case => ({ id, x, z, state: 'none', alone: 0, ghosts: [], bones: [], callT: 2, seen: false, calls: 0, warned: false });
+    const mk = (id: Who, x: number, z: number): Case => ({ id, x, z, state: 'none', alone: 0, ghosts: [], bones: [], callT: 2, seen: false, calls: 0, warned: false, flow: g.grid.flowAt(x, z), passed: false });
     this.cases = [mk('efim', g.npcs.efim.x, g.npcs.efim.z), mk('family', g.family.x, g.family.z), mk('mila', g.mila.x, g.mila.z)];
   }
 
@@ -34,6 +36,27 @@ export class Forsaken {
     if (c.id === 'efim') return g.npcs.efim.state === 'left';
     if (c.id === 'family') return g.family.state === 'left' || g.family.state === 'boy';
     return g.mila.state === 'left';
+  }
+  /** Тьма за спиной дошла до них: забирает всех, кто остался там без огня. */
+  tide(f: number): void {
+    const g = this.g;
+    for (const c of this.cases) {
+      if (c.passed || f > c.flow - 2) continue;
+      if (c.id === 'family' && g.family.state === 'fire') continue;       // их держит костёр, пока горит (см. Game.runTide)
+      c.passed = true;
+      this.swallow(c.id);
+    }
+    const v = g.npcs.vera;
+    if (v.state === 'wait' && f < g.grid.flowAt(v.x, v.z) - 2) g.story.veraTaken();
+    const sh = g.shade;
+    if (sh.state === 'wait' && f < g.grid.flowAt(sh.x, sh.z) - 2) { sh.state = 'gone'; sh.v.alpha = 0; sh.v.update(0); }
+  }
+  /** Забрать тех, кто ещё сидит на этом месте (встречал ты их или нет). */
+  swallow(id: Who): void {
+    const g = this.g, c = this.cases.find((x) => x.id === id);
+    if (!c || c.state !== 'none') return;
+    const there = id === 'efim' ? ['wait', 'left'].includes(g.npcs.efim.state) : id === 'family' ? true : ['wait', 'left', 'down'].includes(g.mila.state);
+    if (there) this.take(c);
   }
   /** Тёма идёт с тобой и слышит. */
   private boyHears(): boolean { const b = this.g.npcs.boy; return b.state === 'follow' || b.state === 'camp'; }

@@ -525,6 +525,22 @@ export class Sfx {
     this.burst(this.white, 'bandpass', 500, 2600, 2.2, 0.16, -0.4, 0.9, 1.2);
     setTimeout(() => { if (this.ctx) { this.burst(this.white, 'bandpass', 2400, 300, 1.9, 0.14, 0.4, 1, 1); this.tone('sine', 62, 24, 2.4, 0.8, 0, 0.3); } }, 1300);
   }
+  /** Зов из темноты: далёкое «а-у» в два слога. Люди и то, что ими притворяется, зовут одинаково. */
+  call(side: number): void {
+    if (!this.ctx) return;
+    const c = this.ctx, pan = Math.max(-0.9, Math.min(0.9, side / 10)), base = 250 + Math.random() * 170;
+    [0, 0.42].forEach((at, i) => {
+      const t = this.now + at, d = i ? 0.75 : 0.3;
+      const o = c.createOscillator(); o.type = 'sawtooth';
+      o.frequency.setValueAtTime(base * (i ? 1.18 : 1), t); o.frequency.linearRampToValueAtTime(base * (i ? 0.9 : 1.12), t + d);
+      const b = c.createBiquadFilter(); b.type = 'bandpass'; b.frequency.value = i ? 760 : 1050; b.Q.value = 2;
+      const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1700;
+      const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.22, t + 0.06); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      const p = c.createStereoPanner(); p.pan.value = pan;
+      o.connect(b).connect(lp).connect(g).connect(p); p.connect(this.gain(0.25, this.master)); p.connect(this.gain(1.6, this.rev)); p.connect(this.gain(0.8, this.echoIn));
+      o.start(t); o.stop(t + d + 0.05);
+    });
+  }
   /** Далёкий человеческий крик: тянется, срывается и обрывается. Почти одно эхо — он далеко. */
   farScream(kind: Voice, pan: number): void {
     if (!this.ctx) return;

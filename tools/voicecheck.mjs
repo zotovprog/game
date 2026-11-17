@@ -44,7 +44,7 @@ await D(`${G}.hud.whisper('Тёма…', 0.8, 'mother-ghost')`);
 ok('ghost calls with a voice', await until(`${S}.played > ${p2}`, 120));
 await wait(7);
 const p3 = await D(`${S}.played`);
-await D(`${S}.death()`); await D(`${G}.hud.onVoice('screen', '', 'Лампа погасла.')`);
+await D(`${S}.death()`); await D(`${G}.hud.onVoice('screen', '', 'Огонь погас.')`);
 ok('narrator speaks on the death screen', await until(`${S}.played > ${p3}`, 60));
 console.log('voice files fetched:', got.ok, 'failed:', got.bad);
 ok('no failed voice requests', got.bad === 0 && got.ok > 0);

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Автопрогон «рук» и диалогов: текст по центру в начале, кнопка «Дальше» и тап в любое место,
-// долив склянки, порыв ветра (гасит / ладонь спасает), разжигание, жесты говорящих.
+// Автопрогон огня и диалогов: текст по центру в начале, «Дальше» и тап в любое место, жаровня кормит огонёк,
+// порыв ветра (сбивает / ладонь спасает), раздувание, жесты говорящих, память огней, тьма за спиной.
 // node tools/hands.mjs <outDir> <baseUrl>
 import { chromium } from 'playwright';
 import fs from 'node:fs';
@@ -32,15 +32,20 @@ const l1 = await D(`document.querySelector('#dialog .txt').textContent`);
 await wait(0.6); await page.mouse.click(120, 330);
 ok('tap anywhere advances', await until(`document.querySelector('#dialog .txt').textContent !== ${JSON.stringify(l1)} || document.querySelector('#dialog').classList.contains('hidden')`, 30));
 
-// 2) долив: стоя, держать R
+// 2) огонь от жаровни: зажёг — у неё огонёк разгорается заново; ложный огонь рядом гаснет
 await page.goto(q('skip=1&reset=1'));
 await page.waitForFunction('window.__GAME__?.ready', null, { timeout: 120000 });
-await D(`(() => { const g = ${G}; g.flags.add('firstDark'); g.wind.t = 999; g.lamp.oil = 30; g.lamp.flasks = 1; window.__GAME__.tp(140, 174.5); })()`);
+ok('nothing at the top of the screen', await D(`!document.querySelector('#goal') && !document.querySelector('#oil')`));
+await D(`(() => { const g = ${G}, b = g.braziers[0]; g.flags.add('firstDark'); g.wind.t = 999; g.lamp.oil = 22; window.__GAME__.tp(b.x + 1.2, b.z + 0.6); })()`);
 await wait(1.5);
-await page.keyboard.down('KeyR');
-await until(`${G}.lamp.pour > 0.35`, 120); await shot('pouring');
-ok('pour: flask spent, oil up', await until(`${G}.lamp.flasks === 0 && ${G}.lamp.oil > 44`, 180), 'oil ' + (await D(`${G}.lamp.oil`)).toFixed(0));
-await page.keyboard.up('KeyR');
+const w5 = `${G}.wisps.find((w) => w.id === 'w5').w.out`;
+ok('false light burns before the fire is lit', (await D(w5)) === false);
+await page.keyboard.press('Space');
+ok('brazier lit from the flame', await until(`${G}.braziers[0].f.lit`, 60));
+await wait(1); await shot('feeding');
+ok('flame feeds at the living fire', await until(`${G}.lamp.oil > 95`, 180), 'oil ' + (await D(`${G}.lamp.oil`)).toFixed(0));
+ok('false light nearby goes out', (await D(w5)) === true);
+await D(`window.__GAME__.tp(140, 174.5)`); await wait(1.5);
 
 // 3) порыв без ладони сбивает пламя; раздувание — удержать «тягу» в полосе
 const robot = (on) => D(`(() => { clearInterval(window.__fan); const g = ${G}; if (!${on}) { g.input.hold('KeyR', false); return; }
@@ -84,23 +89,20 @@ ok('choice shown', await until(`document.querySelectorAll('#dialog .opts button'
 await page.click('#dialog .opts button');
 ok('hero says the choice', await until(`${G}.hero.talk === 1`, 60), JSON.stringify(await D(`document.querySelector('#dialog .who').textContent + ': ' + document.querySelector('#dialog .txt').textContent`)));
 await wait(1.2); await shot('hero-talks');
-// 6) лампа на пирамидке: зажёг — горит, тьма не подходит; пещера помнит её и после перезапуска
-await page.keyboard.press('Space'); await wait(1);
-await D(`(() => { const g = ${G}; g.hud.close?.(); })()`).catch(() => {});
-await page.goto(q('skip=1&reset=1'));
-await page.waitForFunction('window.__GAME__?.ready', null, { timeout: 120000 });
-await D(`(() => { const g = ${G}; g.flags.add('firstDark'); g.wind.t = 999; g.lamp.oil = 70; const c = g.cairns[1]; window.__GAME__.tp(c.x + 1.0, c.z + 0.7); })()`);
-await wait(2);
-ok('cairn prompt', await until(`document.querySelector('#act') && !document.querySelector('#act').classList.contains('hidden') && /камнях/.test(document.querySelector('#act').textContent)`, 60), await D(`document.querySelector('#act').textContent`));
-const oilC = await D(`${G}.lamp.oil`);
-await page.keyboard.press('Space');
-ok('cairn lit', await until(`${G}.cairns[1].lit && ${G}.cairns[1].k > 0.8`, 120), 'oil ' + oilC.toFixed(1) + ' → ' + (await D(`${G}.lamp.oil`)).toFixed(1));
-ok('cairn is a safe light', await D(`${G}.safeLights.some((s) => Math.hypot(s.x - ${G}.cairns[1].x, s.z - ${G}.cairns[1].z) < 0.1)`));
-await D(`window.__GAME__.tp(${G}.cairns[1].x + 4.5, ${G}.cairns[1].z + 3.2)`); await wait(2.5); await shot('cairn-lit');
-// перезапуск без сброса: лампа на пирамидке уже горит
+// 6) пещера помнит огни: зажжённая жаровня горит и в новой попытке
 await page.goto(q('skip=1'));
 await page.waitForFunction('window.__GAME__?.ready', null, { timeout: 120000 });
-ok('cave remembers the lit cairn', await D(`${G}.cairns[1].lit === true && ${G}.cairns[0].lit === false`));
+ok('cave remembers the lit brazier', await D(`${G}.braziers[0].f.lit === true && ${G}.braziers[0].kept === true && ${G}.braziers[1].f.lit === false`));
+// 7) тьма за спиной: доходит до огня, давит, гасит; догнала — пьёт огонь
+await D(`(() => { const g = ${G}, b = g.braziers[0]; g.flags.add('firstDark'); g.wind.t = 999; g.lamp.oil = 95; window.__GAME__.tp(150, 178.8); g.tide.on = true; g.tide.f = b.flow + 12; })()`);
+ok('living fire holds the dark', await until(`${G}.braziers[0].life < 53 && ${G}.braziers[0].f.lit`, 240), 'f ' + (await D(`${G}.tide.f.toFixed(0) + ' vs fire ' + ${G}.braziers[0].flow`)));
+await D(`${G}.braziers[0].life = 3`);
+ok('the dark puts the fire out', await until(`${G}.braziers[0].dead && !${G}.braziers[0].f.lit`, 240));
+await wait(1.5); await shot('fire-fell');
+ok('fallen fire is forgotten', await D(`!JSON.parse(localStorage.getItem('cave-remembers.v1')).fires.includes(0)`));
+const o1 = await D(`${G}.lamp.oil`);
+await D(`(() => { const g = ${G}; g.tide.f = g.grid.flowAt(g.pos.x, g.pos.z) + 1; })()`);
+ok('caught by the dark: flame drains fast', await until(`${G}.lamp.oil < ${o1 - 12} || ${G}.mode === 'dead'`, 120), 'oil ' + o1.toFixed(0) + ' → ' + (await D(`${G}.lamp.oil`)).toFixed(0));
 await browser.close();
 if (errors.length) { console.error('ERRORS:\n' + errors.slice(0, 8).join('\n')); process.exit(1); }
 process.exit(bad ? 1 : 0);

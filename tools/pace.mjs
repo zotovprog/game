@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Темп начала игры: бот проходит первые минуты (берёт лампу, идёт к Ефиму, берёт его, идёт дальше, доливает,
-// прикрывает лампу, раздувает) и печатает журнал — что и когда свалилось на игрока — и плотность событий по 30 с.
+// Темп начала игры: бот проходит первые минуты (берёт огонь, зажигает жаровни и разгорается у них, идёт к Ефиму,
+// берёт его, идёт дальше, прикрывает огонь, раздувает) и печатает журнал — что и когда свалилось на игрока — и плотность событий по 30 с.
 // node tools/pace.mjs <baseUrl> [секунд игры=170]
 import { chromium } from 'playwright';
 const [base = 'http://localhost:5199/', secs = '170'] = process.argv.slice(2);
@@ -14,7 +14,7 @@ await page.click('.overlay button');
 // бот живёт в странице: решает раз в 60 мс
 await page.evaluate(`(() => {
   const g = window.__GAME__.game, K = (c, on) => g.input.hold(c, on);
-  const way = [[183.9, 197.7, 'lamp'], [174, 193], [166, 186.5], [160.5, 182.5], [149, 178.5], [141, 174.8], [134.6, 172.2, 'efim'], [131, 165], [128, 160], [124, 153], [119, 144], [112, 147], [106, 150], [98, 156], [94, 156], [88, 148], [82, 138], [78, 132]];
+  const way = [[183.9, 197.7, 'lamp'], [174, 193], [166, 186.5], [160.5, 182.5], [0, 0, 'b0'], [160.5, 182.5], [149, 178.5], [141, 174.8], [134.6, 172.2, 'efim'], [131, 165], [128, 160], [124, 153], [0, 0, 'b1'], [112, 147], [106, 150], [98, 156], [0, 0, 'b2'], [94, 156], [88, 148], [82, 138], [0, 0, 'b3']];
   let i = 0, talkT = 0;
   window.__bot = setInterval(() => {
     const l = g.lamp, d = document.querySelector('#dialog');
@@ -29,16 +29,16 @@ await page.evaluate(`(() => {
     const need = l.held && l.oil > 0 && (l.falter > 0 || !l.lit);
     K('ShiftLeft', l.held && g.wind.phase !== 'idle' && !need);          // сквозняк — ладонь
     if (need) { K('KeyR', l.draft + l.draftV * 0.25 < g.fanC); return; }  // сбито — стоит и раздувает
-    if (l.held && l.oil < 30 && l.flasks === 0) l.flasks = 1;            // бот не ищет склянки по закоулкам: считаем, что нашёл
-    if (l.held && l.flasks > 0 && l.oil < 38) { K('KeyR', true); return; } // мало масла — стоит и доливает
     K('KeyR', false);
-    if (g.dark.hunters.some((h) => h.state === 'windup' || h.state === 'lunge')) K('ShiftLeft', true);   // шипение — ладонь
+    if (g.dark.hunters.some((h) => h.state === 'windup' || (h.state === 'lunge' && !h.fake))) K('ShiftLeft', true);   // шипение — ладонь
     const w = way[Math.min(i, way.length - 1)];
-    const at = w[2] === 'lamp' ? g.lampOnGround : w[2] === 'efim' ? g.npcs.efim : { x: w[0], z: w[1] };   // к лампе и к Ефиму — по их настоящему месту
+    const bz = w[2] && w[2][0] === 'b' ? g.braziers[+w[2][1]] : null;
+    const at = w[2] === 'lamp' ? g.lampOnGround : w[2] === 'efim' ? g.npcs.efim : bz ? bz : { x: w[0], z: w[1] };   // к огню, к Ефиму и к жаровням — по их настоящему месту
     const dx = at.x - g.pos.x, dz = at.z - g.pos.z, dist = Math.hypot(dx, dz);
-    if (dist < (w[2] === 'lamp' ? 0.9 : w[2] === 'efim' ? 1.7 : 1.1)) {
+    if (dist < (w[2] === 'lamp' ? 0.9 : w[2] === 'efim' || bz ? 1.7 : 1.1)) {
       if (w[2] === 'lamp' && !l.held) { g.input.press('Space'); return; }
       if (w[2] === 'efim' && g.npcs.efim.state === 'wait') { g.input.press('Space'); return; }
+      if (bz && !bz.dead) { if (!bz.f.lit) { g.input.press('Space'); return; } if (l.oil < 97) return; }      // зажёг — и стоит, пока огонёк не разгорится
       if (i < way.length - 1) i++;
       return;
     }
@@ -52,7 +52,7 @@ const r = await page.evaluate(`(() => { const g = window.__GAME__.game; return {
 await browser.close();
 const short = (s) => (s.length > 64 ? s.slice(0, 62) + '…' : s);
 for (const [t, k, s] of r.ev) if (k !== 'dark') console.log(String(t.toFixed(0)).padStart(4) + 'с  ' + k.padEnd(8) + short(s));
-const words = new Set(['hint', 'say', 'bark', 'whisper']), threat = new Set(['gust', 'knock', 'out', 'lunge', 'bite', 'block', 'scream', 'walker']);
+const words = new Set(['hint', 'say', 'bark', 'whisper']), threat = new Set(['gust', 'knock', 'out', 'lunge', 'bite', 'block', 'scream', 'walker', 'press', 'fall']);
 console.log('\nокно      слова  угрозы  звуки тьмы');
 for (let a = 0; a < r.t; a += 30) {
   const win = r.ev.filter(([t]) => t >= a && t < a + 30);

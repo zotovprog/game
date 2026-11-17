@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Автопрогон ядра «Веди отряд»: цель на экране, отставшего хватает тьма, его можно отбить, можно потерять,
+// Автопрогон ядра «Веди отряд»: верх экрана пуст, отставшего хватает тьма, его можно отбить, можно потерять,
 // людей можно оставить у огня. node tools/party.mjs <outDir> <baseUrl>
 import { chromium } from 'playwright';
 import fs from 'node:fs';
@@ -16,12 +16,13 @@ let n = 0;
 const D = (expr) => page.evaluate(expr);
 const wait = (s) => page.waitForTimeout(s * 1000);
 const key = async (k) => { await page.keyboard.down(k); await wait(0.12); await page.keyboard.up(k); };
-const goal = () => D(`document.querySelector('#goal span').textContent`);
+const goal = () => D(`'огонь ' + window.__GAME__.game.lamp.oil.toFixed(0) + ' · верх экрана пуст: ' + !document.querySelector('#goal, #oil')`);
 const shot = async (name) => { await page.screenshot({ path: `${out}/${String(n++).padStart(2, '0')}-${name}.png` }); console.log(name, '|', await goal(), '|', (await D('window.__metrics.flags')).slice(-4).join(',')); };
 const talk = async () => { for (let i = 0; i < 40; i++) { const st = await D(`(() => { const d = document.querySelector('#dialog'); return d.classList.contains('hidden') ? 'closed' : d.querySelectorAll('.opts button').length ? 'choice' : 'line'; })()`); if (st !== 'line') return st; await key('Space'); await wait(0.45); } return 'timeout'; };
 const E = 'window.__GAME__.game.npcs.efim';
 
-await wait(1.5); await shot('goal-bar');
+await wait(1.5); await shot('clean-top');
+await D(`setInterval(() => { const g = window.__GAME__.game; g.lamp.oil = Math.max(g.lamp.oil, 70); }, 250)`);      // огонёк не должен прогореть, пока проверяем людей
 // Ефим идёт с нами
 await D(`(() => { const g = window.__GAME__.game, p = g.npcs.efim; g.lamp.oil = 90; window.__GAME__.tp(p.x + 1.3, p.z + 0.4); })()`); await wait(1.2);
 await key('Space'); await wait(0.6); await talk(); await key('Digit1'); await wait(0.6); await talk(); await wait(1);

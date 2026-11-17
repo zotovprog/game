@@ -28,14 +28,15 @@ const talk = async (pick) => {
 };
 await page.goto(q('skip=1&reset=1'));
 await page.waitForFunction('window.__GAME__?.ready', null, { timeout: 120000 });
-const prep = `const g = ${G}; g.flags.add('firstDark'); g.wind.t = 999; g.lamp.oil = 90; g.lamp.flasks = 2;`;
+const prep = `const g = ${G}; g.flags.add('firstDark'); g.wind.t = 999; g.lamp.oil = 90;`;
 
 // 1) глаза за краем света; идущий по краю
-await D(`(() => { ${prep} g.dread = 0.6; window.__GAME__.tp(118, 142); })()`);
+await D(`(() => { ${prep} g.dread = 0.6; window.__GAME__.tp(118, 142); window.__keep = setInterval(() => { g.lamp.oil = Math.max(g.lamp.oil, 80); }, 200); })()`);      // огонёк не даём прогореть, пока ждём
 ok('eyes open in the dark', await until(`${G}.phantoms.openEyes > 0`, 240)); await shot('eyes');
 await D(`${G}.phantoms.hurry()`);
 ok('someone walks at the edge of light', await until(`${G}.phantoms.walking`, 120)); await wait(1.2); await shot('walker');
 await until(`!${G}.phantoms.walking`, 120);
+await D('clearInterval(window.__keep)');
 
 // 2) отказал Ефиму → ушёл → крик → вернулся: кости и тень
 await D(`(() => { ${prep} const e = g.npcs.efim; window.__GAME__.tp(e.x - 1.25, e.z + 1.25); })()`); await wait(2);

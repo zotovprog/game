@@ -1,18 +1,18 @@
-// Лампа: модель, пламя, свет с тенями. Яркость задаётся извне (0..1) — см. systems/lamp.
-import {
-  Color, ConeGeometry, CylinderGeometry, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, PointLight,
-  SphereGeometry, Sprite, TorusGeometry,
-} from 'three';
+// Огонёк в руке: живое пламя над ладонью, свет с тенями. Сила задаётся извне (0..1) — см. systems/lamp.
+// Сквозняк клонит пламя к Вратам — по нему видно, куда идти.
+import { Color, ConeGeometry, Group, Mesh, MeshBasicMaterial, PointLight, SphereGeometry, Sprite } from 'three';
 import { vnoise } from '../core/rng';
 import { Style } from '../data/styles';
-import { darkify } from './darkness';
+import { T } from '../data/tuning';
 import { makeGlow } from './glow';
 
 export class Lantern {
   readonly group = new Group();
   readonly light: PointLight;
+  private tongue = new Group();        // само пламя: клонится целиком
   private flame: Mesh;
-  private glass: Mesh;
+  private core: Mesh;
+  private coal: Mesh;
   private glow: Sprite;
   private halo: Sprite;
   private flameColor: Color;
@@ -20,35 +20,23 @@ export class Lantern {
   flicker = 1;
 
   constructor(style: Style, shadowSize = 1024) {
-    const metal = darkify(new MeshStandardMaterial({ color: 0x2a2520, roughness: 0.6, metalness: 0.6, flatShading: true }));
-    const base = new Mesh(new CylinderGeometry(0.075, 0.085, 0.035, 8), metal);
-    const cap = new Mesh(new ConeGeometry(0.085, 0.07, 8), metal);
-    cap.position.y = 0.215;
-    const ring = new Mesh(new TorusGeometry(0.045, 0.008, 4, 10), metal);
-    ring.position.y = 0.29;
-    this.group.add(base, cap, ring);
-    for (let i = 0; i < 4; i++) {
-      const post = new Mesh(new CylinderGeometry(0.007, 0.007, 0.17, 4), metal);
-      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-      post.position.set(Math.cos(a) * 0.066, 0.1, Math.sin(a) * 0.066);
-      this.group.add(post);
-    }
     this.flameColor = new Color(style.lamp);
-    this.glass = new Mesh(
-      new CylinderGeometry(0.058, 0.058, 0.16, 8, 1, true),
-      new MeshBasicMaterial({ color: this.flameColor.clone().multiplyScalar(0.5), transparent: true, opacity: 0.35, depthWrite: false }),
-    );
-    this.glass.position.y = 0.1;
-    this.flame = new Mesh(new SphereGeometry(0.028, 6, 5), new MeshBasicMaterial({ color: 0xffffff }));
-    this.flame.position.y = 0.085;
+    // уголёк, из которого растёт пламя
+    this.coal = new Mesh(new SphereGeometry(0.022, 6, 5), new MeshBasicMaterial({ color: 0x5a1c08 }));
+    this.coal.scale.set(1.3, 0.7, 1.3);
+    this.flame = new Mesh(new ConeGeometry(0.034, 0.13, 7, 3), new MeshBasicMaterial({ color: this.flameColor.clone(), transparent: true, opacity: 0.92 }));
+    this.flame.position.y = 0.075;
+    this.core = new Mesh(new SphereGeometry(0.019, 6, 5), new MeshBasicMaterial({ color: 0xffffff }));
+    this.core.position.y = 0.035; this.core.scale.set(1, 1.5, 1);
+    this.tongue.add(this.flame, this.core);
     this.glow = makeGlow(style.lamp, 0.9, 1.0);
-    this.glow.position.y = 0.1;
+    this.glow.position.y = 0.07;
     this.halo = makeGlow(style.lamp, 5, 0.02);
-    this.halo.position.y = 0.1;
-    this.group.add(this.glass, this.flame, this.glow, this.halo);
+    this.halo.position.y = 0.07;
+    this.group.add(this.coal, this.tongue, this.glow, this.halo);
 
     this.light = new PointLight(style.lamp, 0, 12, 0.9);
-    this.light.position.y = 0.1;
+    this.light.position.y = 0.12;
     this.light.castShadow = true;
     this.light.shadow.mapSize.set(shadowSize, shadowSize);
     this.light.shadow.camera.near = 0.12;
@@ -58,21 +46,26 @@ export class Lantern {
     this.group.add(this.light);
   }
 
-  /** power 0..1 — сила пламени, radius — радиус круга света в метрах. */
-  update(t: number, power: number, radius: number, gain: number): void {
+  /** power 0..1 — сила пламени, radius — круг света в метрах; leanX/leanZ — куда клонит сквозняк (в осях держащего), gust — 0..1 порыв. */
+  update(t: number, power: number, radius: number, gain: number, leanX = 0, leanZ = 0, gust = 0): void {
     const n = vnoise(t * 7.3, 1.7) * 0.6 + vnoise(t * 19.1, 9.2) * 0.4; // 0..1
     const unstable = power < 0.35 ? (0.35 - power) * 2.2 : 0;            // слабое пламя дрожит сильнее
     this.flicker = 1 - (0.1 + unstable * 0.5) * n;
     const p = power * this.flicker;
     this.light.intensity = (3 + 19 * p) * gain * (power > 0.001 ? 1 : 0);
     this.light.distance = Math.max(1.5, radius * 1.55);
-    const fc = (this.flame.material as MeshBasicMaterial).color;
-    fc.copy(this.flameColor).lerp(new Color(0xffffff), 0.35).multiplyScalar(1.2 + 3.5 * p);
-    this.flame.scale.set(1, 0.8 + 1.4 * p + n * 0.25, 1);
-    (this.glow.material as { opacity: number }).opacity = 0.2 + 0.4 * p;
-    this.glow.scale.setScalar(0.25 + 0.4 * p);
+    // пламя: чем сильнее, тем выше; клонится по сквозняку и мечется в порыв
+    const h = 0.45 + 1.5 * p + n * 0.3;
+    this.flame.scale.set(0.7 + 0.5 * p, h, 0.7 + 0.5 * p);
+    this.flame.position.y = 0.01 + 0.065 * h;
+    const k = T.draft.lean * (1 + 2.2 * gust), wob = (vnoise(t * 9.7, 4.1) - 0.5) * (0.25 + 1.2 * gust);
+    this.tongue.rotation.set(leanZ * k + wob * 0.6, 0, -leanX * k + wob);
+    (this.flame.material as MeshBasicMaterial).color.copy(this.flameColor).multiplyScalar(1.1 + 2.4 * p);
+    (this.core.material as MeshBasicMaterial).color.setScalar(1.2 + 3 * p);
+    this.core.visible = p > 0.08;
+    (this.glow.material as { opacity: number }).opacity = 0.25 + 0.45 * p;
+    this.glow.scale.setScalar(0.3 + 0.5 * p);
     (this.halo.material as { opacity: number }).opacity = p;
     this.halo.scale.setScalar(Math.max(0.5, radius * 1.1));
-    (this.glass.material as MeshBasicMaterial).opacity = 0.15 + 0.3 * p;
   }
 }

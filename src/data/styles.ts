@@ -1,6 +1,6 @@
 // Стиль игры в цифрах — см. .studioigor/ART_BIBLE.md («Стальной свет в абсолютной тьме»).
 export interface Style {
-  lamp: number;          // пламя лампы: холодно-белое с каплей тепла
+  lamp: number;          // огонёк в руке: тёплый
   lampGain: number;
   fire: number;          // зарезервированный тёплый акцент: живое, человеческое, выход
   wisp: number;          // ложный огонь: мёртвенно-бледный
@@ -16,7 +16,7 @@ export interface Style {
 }
 
 export const STYLE: Style = {
-  lamp: 0xf3ead6, lampGain: 1.05, fire: 0xff8a3a, wisp: 0xd6ecd0,
+  lamp: 0xffb46e, lampGain: 1.6, fire: 0xff8a3a, wisp: 0xd6ecd0,
   rock: 0x5a646e, rockAlt: 0x333b43, floor: 0x4a535b, floorAlt: 0x232a30,
   edgeNoise: 0.6,
   sat: 0.78, contrast: 1.14, tint: [1.0, 0.995, 0.985],

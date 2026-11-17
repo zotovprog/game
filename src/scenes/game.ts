@@ -1,5 +1,5 @@
 // Игра: сборка глубины из данных и главный цикл. Сюжетные сцены и выборы — в systems/story.ts.
-import { Color, Group, Mesh, MeshBasicMaterial, SphereGeometry, Sprite, Vector3 } from 'three';
+import { Color, Group, Mesh, MeshBasicMaterial, SphereGeometry, Sprite, SpriteMaterial, Vector3 } from 'three';
 import { Sfx } from '../audio/sfx';
 import { Input } from '../core/input';
 import { clamp, damp, lerp, mulberry32, smooth } from '../core/rng';
@@ -12,17 +12,18 @@ import { Darkness, DarkWorld, SafeLight } from '../systems/dark';
 import { Forsaken } from '../systems/forsaken';
 import { Pace } from '../systems/pace';
 import { Phantoms } from '../systems/phantoms';
-import { addOil, fanStep, fanZone, flamePower, isDead, knockFlame, LampState, lightRadius, needsFan, newLamp, pourStep, stepLamp } from '../systems/lamp';
-import { Story } from '../systems/story';
+import { addOil, fanStep, fanZone, feed, flamePower, isDead, knockFlame, LampState, lightRadius, needsFan, newLamp, stepLamp } from '../systems/lamp';
+import { savedPoint, Story } from '../systems/story';
 import { Hud } from '../ui/hud';
 import { buildCave } from '../view/cave';
 import { addDarkLight, beginDarkLights, commitDarkLights, darkU } from '../view/darkness';
+import { Draft } from '../view/draft';
 import { Dust } from '../view/dust';
 import { makeGlow } from '../view/glow';
 import { Human } from '../view/human';
 import { Lantern } from '../view/lantern';
-import { Emitter, LightPool } from '../view/lightpool';
-import { Candle, Fire, Gate, makeFlask, Wisp } from '../view/props';
+import { LightPool } from '../view/lightpool';
+import { Candle, Fire, Gate, makeBones, Wisp } from '../view/props';
 import { Spirit } from '../view/spirit';
 import { Stage } from '../view/stage';
 import { Grid } from '../world/grid';
@@ -54,9 +55,12 @@ export class Game {
   readonly pos = { x: 0, z: 0 };
   readonly face = { x: 0, z: 1 };
   readonly flasks: { g: Group; x: number; z: number; taken: boolean; own: boolean }[] = [];
-  readonly braziers: { f: Fire; x: number; z: number }[] = [];
-  /** лампы прежних носителей на пирамидках: зажжённые горят всегда и не подпускают тьму */
-  readonly cairns: { x: number; y: number; z: number; lit: boolean; k: number; glow: Sprite; emitter: Emitter; old: boolean }[] = [];
+  /** жаровни: flow — шагов до Врат; life — сколько секунд ещё продержится, когда до неё дошла тьма; dead — съедена; kept — горит с прошлой попытки */
+  readonly braziers: { f: Fire; x: number; z: number; flow: number; life: number; dead: boolean; kept: boolean; coal: Sprite }[] = [];
+  /** ложные голоса: зовут из темноты, как люди; на месте — кости */
+  readonly lures: { x: number; z: number; done: boolean }[] = [];
+  /** тени тех, кого ты не вывел в прошлый раз: сидят у огней, что горят с прошлой попытки, и смотрят */
+  private watchers: { v: Spirit; x: number; z: number; at: number }[] = [];
   readonly wisps: { w: Wisp; id: string; x: number; z: number }[] = [];
   readonly npcs: Record<NpcId, Npc>;
   readonly companions: Npc[] = [];
@@ -95,6 +99,7 @@ export class Game {
   private yaw = 2.4;
   beacon: { glow: Sprite; color: number } | null = null;
   private dust: Dust;
+  private draft: Draft;
   campfire: Fire;
   private crumbs: { x: number; z: number }[] = [];
   private timers: Timer[] = [];
@@ -124,15 +129,7 @@ export class Game {
   constructor(readonly stage: Stage, readonly hud: Hud, readonly input: Input, readonly sfx: Sfx, readonly style: Style, readonly def: LevelDef, opts: { skip: boolean }) {
     const scene = stage.scene;
     this.grid = new Grid(def.w, def.h, def.carves, def.seed);
-    const cave = buildCave(this.grid, style, def);
-    scene.add(cave.group);
-    cave.cairns.forEach((c, i) => {
-      const glow = makeGlow(style.lamp, 0.75, 0.95);
-      glow.position.set(c.x, c.y + 0.04, c.z); glow.visible = false;
-      scene.add(glow);
-      const old = this.trace.cairns.includes(i);
-      this.cairns.push({ ...c, lit: old, k: old ? 1 : 0, glow, old, emitter: { x: c.x, y: c.y + 0.25, z: c.z, color: style.lamp, intensity: 0, distance: 6 } });
-    });
+    scene.add(buildCave(this.grid, style, def).group);
     this.grid.buildFlow(def.gate.bowl[0], def.gate.bowl[1]);
     this.flowStart = Math.max(1, this.grid.flowAt(...this.grid.snap(def.start.hero[0], def.start.hero[1])));
     const snap = (p: [number, number], c = 0.7) => this.grid.snap(p[0], p[1], c);
@@ -156,15 +153,28 @@ export class Game {
     dead.setPose('sit', true); dead.update(0.016, 0, 0);
     scene.add(dead.root);
 
-    for (const p of def.flasks) this.addFlask(...snap(p, 0.5), false);
     def.braziers.forEach((p, i) => {
       const [x, z] = snap(p, 0.9);
       const f = new Fire(style, 'brazier', i + 11);
       f.group.position.set(x, 0, z);
       scene.add(f.group);
       this.grid.obstacles.push({ x, z, r: 0.45 });
-      this.braziers.push({ f, x, z });
+      const kept = !savedPoint() && this.trace.fires.includes(i);   // пещера помнит огни: зажжённое в прошлый раз горит (в новой попытке)
+      if (kept) { f.lit = true; f.k = 1; }
+      // уголь в чаше тлеет и виден из темноты: ровная красная точка — не дрожит и не висит в воздухе, как ложный огонь
+      const coal = makeGlow(style.fire, T.draft.coal, 1);
+      const cm = coal.material as SpriteMaterial; cm.depthTest = false; cm.opacity = 0;
+      coal.position.set(x, 0.95, z);
+      stage.over.add(coal);
+      this.braziers.push({ f, x, z, flow: this.grid.flowAt(x, z), life: T.tide.hold, dead: false, kept, coal });
     });
+    for (const p of def.lures) {
+      const [x, z] = snap(p, 0.5);
+      const bones = makeBones(x * 3.1 + z);
+      bones.position.set(x, 0, z); bones.rotation.y = x + z;
+      scene.add(bones);
+      this.lures.push({ x, z, done: false });
+    }
     def.wisps.forEach((wd, i) => {
       const [x, z] = snap(wd.at, 0.5);
       const w = new Wisp(style, i + 1);
@@ -286,6 +296,8 @@ export class Game {
     this.pool = new LightPool(scene, 3);
     this.dust = new Dust(style.lamp, stage.mobile ? 150 : 280);
     scene.add(this.dust.points);
+    this.draft = new Draft(style.lamp, this.grid, stage.mobile ? Math.round(T.draft.threads * 0.7) : T.draft.threads);
+    scene.add(this.draft.mesh);
     darkU.uSwallow.value.set(0, 0, 0, 0);
     this.forsaken = new Forsaken(this);
     this.story = new Story(this);
@@ -313,27 +325,25 @@ export class Game {
 
     stage.target.set(this.pos.x, 0, this.pos.z);
     stage.fade = 1;
+    this.tideOff = opts.skip;
+    this.familyFlow = this.grid.flowAt(this.family.x, this.family.z);
+    this.seatWatchers();
+    for (const b of this.braziers) if (b.kept) this.story.truth(b.x, b.z, true);
     if (opts.skip) this.story.skipIntro(); else this.story.menu();
     hud.onPause = () => this.pause(!this.paused);
   }
 
-  addFlask(x: number, z: number, own: boolean): void {
-    const g = makeFlask(this.style);
+  /** Уголёк на месте прошлой гибели: ещё тёплый — подхватишь, и твой огонь окрепнет. */
+  addEmber(x: number, z: number): void {
+    const g = new Group();
+    const coal = new Mesh(new SphereGeometry(0.06, 6, 5), new MeshBasicMaterial({ color: 0x2a0f06 }));
+    coal.scale.set(1.3, 0.7, 1); coal.position.y = 0.04;
+    const glow = makeGlow(this.style.fire, 0.5, 0.7);
+    glow.position.y = 0.08;
+    g.add(coal, glow);
     g.position.set(x, 0, z);
     this.stage.scene.add(g);
-    this.flasks.push({ g, x, z, taken: false, own });
-  }
-  /** Зажечь лампу на пирамидке от своей: островок света и метка пройденного. Пещера помнит его и в следующий раз. */
-  lightCairn(i: number): void {
-    const c = this.cairns[i], lamp = this.lamp;
-    if (!c || c.lit) return;
-    if (lamp.oil <= T.cairn.cost + 1) { this.hud.hint(TX.noOil, 3); return; }
-    lamp.oil -= T.cairn.cost;
-    c.lit = true;
-    this.sfx.relight(); this.chroma = 0.25;
-    this.hud.hint(this.flags.has('cairnLit') ? TX.cairnAgain : TX.cairnLit, this.flags.has('cairnLit') ? 2 : 8);
-    this.flags.add('cairnLit'); this.flags.add('cairn');
-    if (!this.trace.cairns.includes(i)) { this.trace.cairns.push(i); saveTrace(this.trace); }
+    this.flasks.push({ g, x, z, taken: false, own: true });
   }
   /** Свет в чаше Врат: лампа прежнего носителя или огарок того, кто остался. */
   lightBowl(color: number): void {
@@ -366,7 +376,7 @@ export class Game {
   takeLamp(): void {
     this.lamp.held = true;
     this.hero.attach(this.lantern.group);
-    this.lantern.group.position.set(0, -0.3, 0);
+    this.lantern.group.position.set(0, 0.03, 0.02);            // огонёк стоит над ладонью
     this.lantern.group.rotation.set(0, 0, 0);
     this.hud.showHud(true);
     this.sfx.relight();
@@ -541,7 +551,7 @@ export class Game {
   }
   /** где сейчас центр живой полосы тяги (для автопрогонов) */
   fanC = 0.5;
-  private blowT = 0; private wasR = false;
+  private blowT = 0; private feeding = false;
   /** Журнал темпа: [секунда игры, что, подробность] — по нему видно, сколько всего сваливается на игрока. */
   readonly events: [number, string, string][] = [];
   playT = 0;
@@ -562,14 +572,102 @@ export class Game {
   /** Срежиссированный первый порыв (учит прикрывать лампу). */
   forceGust(): void { if (this.wind.phase === 'idle') this.wind.t = 0; }
 
+  /** Тьма за спиной: всё, что дальше от Врат (по ходам пещеры), чем фронт f, ею съедено. Живой огонь держит её, пока не погаснет. */
+  readonly tide = { on: false, f: 0, done: false, chase: false };
+  /** сколько ещё продержится костёр семьи, когда до него дойдёт тьма */
+  private familyLife = T.tide.hold;
+  private runTide(dt: number, live: boolean): void {
+    const Td = T.tide, tide = this.tide;
+    if (tide.done) return;
+    if (!tide.on) { if (this.pace.stage >= 1 && !this.tideOff) { tide.on = true; tide.f = this.flowStart + Td.lead; } return; }
+    if (!live) return;
+    const hf = this.grid.flowAt(this.pos.x, this.pos.z);
+    if (hf >= 65535) return;
+    // огни, до которых она дошла, гаснут не сразу: давит, они тускнеют — и держат её
+    let held = false;
+    for (const b of this.braziers) {
+      if (b.dead) continue;
+      if (tide.f > b.flow + Td.band) continue;                 // ещё не дошла
+      if (!b.f.lit) { b.dead = true; continue; }               // незажжённую глотает молча
+      held = true;
+      if (b.life === Td.hold) { this.ev('press'); if (this.dist(b.x, b.z) < 40) this.sfx.dark('moan', clamp(((b.x - this.pos.x) * this.stage.right.x + (b.z - this.pos.z) * this.stage.right.z) / 10, -1, 1), 0.7); }
+      b.life -= dt;
+      b.f.strength = clamp(0.3 + 0.7 * (b.life / Td.hold), 0.3, 1);
+      if (b.life <= 0) this.fireFalls(b);
+    }
+    const fam = this.family;
+    if (fam.fire.lit && tide.f <= this.familyFlow + Td.band) {
+      held = true;
+      this.familyLife -= dt;
+      fam.fire.strength = clamp(0.3 + 0.7 * (this.familyLife / Td.hold), 0.3, 1);
+      if (this.familyLife <= 0) { fam.fire.lit = false; this.forsaken.swallow('family'); }
+    }
+    if (!held) {
+      const gap = tide.f - hf;
+      tide.f -= (tide.chase ? T.wave.speed : Td.speed * (gap > Td.far ? Td.catchUp : 1)) * dt;
+    }
+    this.forsaken.tide(tide.f);                                // те, кто остался за ней без огня
+  }
+  /** только для автопрогонов: тьма за спиной не идёт сама */
+  tideOff = false;
+  private familyFlow = 0;
+  /** Тьма погасила огонь: всё, что за ним, потеряно; те, кто ждал у него, — тоже. */
+  private fireFalls(b: Game['braziers'][number]): void {
+    b.dead = true; b.f.lit = false;
+    this.ev('fall');
+    const near = this.dist(b.x, b.z);
+    if (near < 45) { this.sfx.snuff(); this.sfx.dark('moan', 0, clamp(1.4 - near / 35, 0.3, 1)); }
+    if (near < 14) { this.stage.shake = Math.max(this.stage.shake, 0.4); this.phantoms.surge(2); }
+    for (const n of [...this.companions]) if (n.state === 'camp' && n.goal && Math.hypot(n.goal.x - b.x, n.goal.z - b.z) < 3.5) this.story.taken(n);
+    const at = this.braziers.indexOf(b);
+    for (const w of this.watchers) if (w.at === at) { w.v.alpha = 0; w.v.update(0); }
+    this.watchers = this.watchers.filter((w) => w.at !== at);
+    this.rememberFires();
+  }
+  /** Пещера помнит огни: что горит сейчас, будет гореть и в следующей попытке. */
+  rememberFires(): void {
+    this.trace.fires = this.braziers.map((b, i) => (b.f.lit && !b.dead ? i : -1)).filter((i) => i >= 0);
+    saveTrace(this.trace);
+  }
+  /** Тени тех, кого ты не вывел в прошлый раз, сидят у огней, что горят с тех пор. Смотрят. Подойдёшь — тают. */
+  private watch(t: number, dt: number): void {
+    for (const w of this.watchers) {
+      const d = this.dist(w.x, w.z);
+      w.v.alpha = damp(w.v.alpha, d < 1.6 ? 0 : d < 22 ? 0.92 : 0, d < 1.6 ? 5 : 2, dt);
+      w.v.group.rotation.y = Math.atan2(this.pos.x - w.x, this.pos.z - w.z);
+      w.v.update(t);
+    }
+  }
+  private seatWatchers(): void {
+    const tall: Record<string, number> = { efim: 0.74, vera: 0.72, mila: 0.44, father: 0.78, mother: 0.7, boy: 0.5 };
+    const lost = this.trace.lost.filter((id) => id in tall);
+    if (!lost.length) return;
+    let k = 0;
+    this.braziers.forEach((b, i) => {
+      if (!b.kept) return;
+      for (let j = 0; j < 2 && k < lost.length + 2; j++, k++) {
+        const id = lost[k % lost.length], a = 0.7 + j * 2.3 + i * 1.1;
+        const [x, z] = this.grid.snap(b.x + Math.cos(a) * 2.1, b.z + Math.sin(a) * 2.1, 0.4);
+        const v = new Spirit(this.style, (k * 0.37) % 1, tall[id], 0);
+        v.group.position.set(x, 0, z); v.alpha = 0; v.face = 0; v.update(0);
+        this.stage.scene.add(v.group);
+        this.watchers.push({ v, x, z, at: i });
+      }
+    });
+  }
+
   /** Вал: в конце тьма идёт по твоему следу. Остановишься — накроет; отставших накрывает первыми. */
   private runWave(dt: number): void {
     const W = this.wave, moved = Math.hypot(this.pos.x - this.lastPos.x, this.pos.z - this.lastPos.z);
     this.lastPos.x = this.pos.x; this.lastPos.z = this.pos.z;
+    // вал — это тьма, что идёт за спиной, когда она уже близко
+    const tide = this.tide, hf = this.grid.flowAt(this.pos.x, this.pos.z);
+    const gap = tide.on && !tide.done && hf < 65535 ? tide.f - hf : 99;
+    W.on = gap < T.tide.near; W.s = clamp(gap, 0, 30);
     if (!W.on) return;
     const gp = this.gate.group.position;
-    if (this.dist(gp.x, gp.z) < 11) { W.on = false; W.s = 99; this.story.waveEnd(); return; }
-    W.s = clamp(W.s + moved - T.wave.speed * dt, 0, 30);
+    if (this.dist(gp.x, gp.z) < 11) { tide.done = true; W.on = false; W.s = 99; if (tide.chase) this.story.waveEnd(); return; }
+    void moved;
     const [wx, wz] = this.trail(W.s);
     this.dark.extra.push({ x: wx, z: wz, w: 3.6, s: 1 });
     if (W.s < T.wave.reach) {
@@ -612,8 +710,7 @@ export class Game {
     else {
       const n = this.npcs, s = this.story;
       if (!this.flags.has('dead')) near(this.deadAt.x, this.deadAt.z, 1.5, TX.promptDead, () => s.examineDead());
-      for (const b of this.braziers) if (!b.f.lit) near(b.x, b.z, 1.7, TX.promptBrazier, () => s.lightBrazier(b.f));
-      if (this.lamp.lit && this.lamp.oil > 0) this.cairns.forEach((c, i) => { if (!c.lit) near(c.x, c.z, T.cairn.reach, TX.promptCairn, () => this.lightCairn(i)); });
+      if (this.lamp.lit && this.lamp.oil > 0) for (const b of this.braziers) if (!b.f.lit && !b.dead) near(b.x, b.z, 1.9, TX.promptBrazier, () => s.lightBrazier(b));
       if (n.efim.state === 'wait' || n.efim.state === 'left') near(n.efim.x, n.efim.z, 2.1, TX.promptTalk, () => s.talkEfim());
       if (n.vera.state === 'wait') near(n.vera.x, n.vera.z, 2.1, TX.promptTalk, () => s.talkVera());
       if (this.family.state === 'wait') near(this.family.x, this.family.z, 2.6, TX.promptTalk, () => s.talkFamily());
@@ -636,15 +733,12 @@ export class Game {
     this.hud.prompt(list[0]?.text ?? null);
     // сразу после разговора действие не срабатывает: иначе, пролистывая реплики, жмёшь следующую кнопку вслепую
     if (hit && list[0] && this.actLock <= 0) { this.lookAt = { x: list[0].x, z: list[0].z }; list[0].act(); }
-    // масло подбирается само: в панике не до кнопок
+    // уголёк прошлой попытки подхватывается сам
     for (const f of this.flasks) {
       if (f.taken || !this.lamp.held || this.dist(f.x, f.z) > 0.95) continue;
-      if (!f.own && this.lamp.flasks >= T.lamp.maxFlasks) { if (!this.flags.has('fullHint')) { this.flags.add('fullHint'); this.hud.hint(TX.flaskFull, 5); } continue; }
       f.taken = true; f.g.visible = false;
-      this.sfx.pickup();
-      if (f.own) { addOil(this.lamp, T.lamp.ownLamp); this.hud.hint(TX.ownLamp, 3); continue; }
-      this.lamp.flasks++;
-      if (!this.flags.has('flaskHint')) { this.flags.add('flaskHint'); this.hud.hint(this.hud.touch ? TX.flaskHintTouch : TX.flaskHintKb, 8); }
+      this.sfx.pickup(); this.sfx.relight();
+      addOil(this.lamp, T.lamp.ownLamp);
     }
   }
 
@@ -701,18 +795,11 @@ export class Game {
     this.moveNpcs(dt, t);
     this.hero.update(dt, t, this.speed01);
 
-    // руки: прикрыть лампу ладонью (держать), долить (держать, стоя на месте), раздуть сбитое пламя (держать тягу в полосе)
+    // руки: прикрыть огонь ладонью (держать), раздуть сбитое пламя (держать тягу в полосе). С ребёнком на руках ладонь занята.
     const hands = live && lamp.held;
-    lamp.shield = damp(lamp.shield, hands && this.input.down('ShiftLeft', 'ShiftRight', 'KeyC') ? 1 : 0, 9, dt);
+    lamp.shield = damp(lamp.shield, hands && !this.carrying && this.input.down('ShiftLeft', 'ShiftRight', 'KeyC') ? 1 : 0, 9, dt);
     const still = hands && this.speed01 < 0.05, holdR = this.input.down('KeyR');
     const fanning = needsFan(lamp);
-    const wasPour = lamp.pour;
-    // с ребёнком на руках не долить: сначала опусти её
-    if (this.carrying && holdR && !this.wasR && !fanning && lamp.flasks > 0) hud.hint(TX.mila.handsBusy, 4);
-    this.wasR = holdR;
-    const did = pourStep(lamp, dt, still && holdR && lamp.shield < 0.3 && !this.carrying);
-    if (lamp.pour > 0 && wasPour === 0) this.sfx.pour();
-    if (did === 'poured') { this.sfx.pickup(); this.sfx.relight(); this.chroma = 0.3; }
     if (hands || !fanning) {
       const blowing = still && holdR && fanning;
       const fan = fanStep(lamp, dt, blowing, this.dread);
@@ -727,7 +814,7 @@ export class Game {
       if (fan === 'relit') { this.sfx.relight(); this.dark.scatter(); }
       if (fan === 'out') this.blownOut();
     }
-    this.hero.shield = lamp.shield; this.hero.pour = lamp.pour > 0 ? 1 : 0;
+    this.hero.shield = lamp.shield; this.hero.pour = this.feeding && lamp.oil < 99 ? 1 : 0;
     this.runGust(dt, live && lamp.held && this.pace.stage >= 2 && !this.calm);
     lamp.snuff = Math.max(this.gust, this.wind.snuff);
     const wasOil = lamp.oil;
@@ -740,6 +827,7 @@ export class Game {
     this.dread = damp(this.dread, wantDread, 0.6, dt);
     if (live && lamp.held && this.flags.has('firstDark')) this.dark.setCount(1 + Math.round(this.dread * 4));
     if (live) stepLamp(lamp, dt, load, 1 + T.dread.burnBonus * this.dread);
+    this.runTide(dt, live);
     if (live) this.runWave(dt);
     if (lamp.held && wasOil > T.lamp.lowOil && lamp.oil <= T.lamp.lowOil) hud.hint(TX.oilLow, 4);
     if (lamp.held && wasOil > 0 && lamp.oil <= 0) { hud.hint(TX.ember, 4); this.sfx.snuff(); }
@@ -747,7 +835,11 @@ export class Game {
     const rTarget = this.dying ? lerp(T.death.flare, 0.2, smooth(T.death.grab * 0.7, T.death.fadeFrom, this.dying.t)) : lamp.held ? lightRadius(lamp) : 2.3;
     this.radius = damp(this.radius, rTarget, this.dying ? 9 : rTarget < this.radius ? 3 : 6, dt);
     const power = this.dying ? Math.max(0.05, 0.75 * (1 - smooth(T.death.grab, T.death.fadeFrom, this.dying.t))) : lamp.held ? flamePower(lamp) : 0.16;
-    this.lantern.update(t, power, this.radius, this.style.lampGain);
+    {
+      // пламя клонится по сквозняку (в осях героя: он повёрнут на yaw)
+      const c = Math.cos(this.yaw), sn = Math.sin(this.yaw), k = lamp.held ? 1 : 0.4;
+      this.lantern.update(t, power, this.radius, this.style.lampGain, (this.drift.dx * c - this.drift.dz * sn) * k, (this.drift.dx * sn + this.drift.dz * c) * k, this.wind.snuff);
+    }
     this.lantern.group.getWorldPosition(this.lampWorld);
 
     if (live) { this.interact(); this.party(dt); this.story.zones(); this.story.wisps(); this.story.drama(dt); this.forsaken.update(dt, t); } else hud.prompt(null);
@@ -757,28 +849,28 @@ export class Game {
     darkU.uLamp.value.set(this.lampWorld.x, this.lampWorld.z);
     addDarkLight(this.lampWorld.x, this.lampWorld.y, this.lampWorld.z, this.radius * (0.965 + 0.035 * this.lantern.flicker));
     const safe: SafeLight[] = [];
-    let fireNear = 0;
+    let fireNear = 0, feeding = false;
     const fire = (f: Fire, x: number, z: number) => {
       f.update(t, dt);
       if (f.k <= 0.02) return;
       const r = T.fire.radius * f.k;
       addDarkLight(x, 1, z, r); this.pool.add(f.emitter); safe.push({ x, z, r });
+      if (f.lit && this.dist(x, z) < T.lamp.feedReach) feeding = true;
       fireNear = Math.max(fireNear, 1 - smooth(1.5, 9, this.dist(x, z)));
     };
     this.campfire.update(t, dt);
     fire(this.family.fire, this.family.x, this.family.z);
-    for (const b of this.braziers) fire(b.f, b.x, b.z);
-    for (const c of this.cairns) {
-      if (!c.lit) continue;
-      c.k = damp(c.k, 1, 2.2, dt);
-      const fl = 0.9 + 0.1 * Math.sin(t * 9 + c.x * 3.1) * Math.sin(t * 5.3 + c.z);
-      c.glow.visible = true; c.glow.scale.setScalar(0.75 * (0.5 + 0.5 * c.k) * fl);
-      if (this.dist(c.x, c.z) > 30) continue;
-      const r = T.cairn.radius * c.k;
-      c.emitter.intensity = 9 * c.k * fl;
-      addDarkLight(c.x, 1, c.z, r); this.pool.add(c.emitter); safe.push({ x: c.x, z: c.z, r: r * 0.85 });
-      if (c.old && !this.flags.has('cairnOld') && this.dist(c.x, c.z) < 3.2) { this.flags.add('cairnOld'); hud.hint(TX.cairnRemember, 6); }
+    for (const b of this.braziers) {
+      fire(b.f, b.x, b.z);
+      const cold = !b.f.lit && !b.dead && this.mode !== 'menu', far = this.dist(b.x, b.z);
+      const glow = cold ? (1 - smooth(T.draft.coalFar * 0.6, T.draft.coalFar, far)) * (T.draft.coalGlow[0] + (T.draft.coalGlow[1] - T.draft.coalGlow[0]) * (0.5 + 0.5 * Math.sin(t * 1.1 + b.x))) : 0;
+      const cm = b.coal.material as SpriteMaterial;
+      cm.opacity = damp(cm.opacity, glow, 3, dt); b.coal.visible = cm.opacity > 0.01;
     }
+    // от жаровни до жаровни: у живого огня твой огонёк разгорается заново
+    if (feeding && live && lamp.held && (lamp.oil > 0 || !lamp.lit)) { if (!this.feeding && lamp.oil < 90) this.sfx.relight(); feed(lamp, dt); }
+    this.feeding = feeding;
+    this.watch(t, dt);
     for (const w of this.wisps) {
       w.w.update(t, dt);
       if (w.w.k > 0.02) { addDarkLight(w.x, 1, w.z, T.wisp.glow * w.w.k); this.pool.add(w.w.emitter); }
@@ -822,7 +914,6 @@ export class Game {
     // тьма
     const w = this.world(lamp.held && this.mode === 'play' && !talking && this.dist(gp.x, gp.z) > 9 && this.dist(this.shade.x, this.shade.z) > (this.shade.state === 'wait' ? 7 : 0));
     w.ember = this.ember || this.gust > 0.5 || !lamp.lit; w.safe = safe;
-    if (lamp.pour > 0) for (const h of this.dark.hunters) h.cool -= dt;          // пока льёшь, она торопится
     if (this.dying) this.engulf(dt);
     if (inSafe) w.repel = true;
     const touched = this.dark.update(dt, w);
@@ -888,16 +979,14 @@ export class Game {
     // сквозняк: пыль сносит к выходу
     this.grid.flowDir(this.pos.x, this.pos.z, this.flow);
     this.drift.dx = damp(this.drift.dx, this.flow[0], 1.2, dt); this.drift.dz = damp(this.drift.dz, this.flow[1], 1.2, dt);
-    this.drift.x += this.drift.dx * 0.55 * dt; this.drift.z += this.drift.dz * 0.55 * dt;
-    this.dust.update(t, this.lampWorld, this.radius, power, S.mobile ? 2.2 : 2.4 * S.renderer.getPixelRatio(), this.drift.x, this.drift.z);
-    if (this.flags.has('goal') && this.mode === 'play') {
-      const c = this.story.tally(), steps = this.grid.flowAt(this.pos.x, this.pos.z);
-      const sx = this.drift.dx * S.right.x + this.drift.dz * S.right.z, sy = this.drift.dx * S.up.x + this.drift.dz * S.up.z;
-      hud.setGoal(`${TX.goal.with} <b>${c.with}</b> · ${TX.goal.found} <b>${c.found}/7</b>${c.lost ? ` · ${TX.goal.lost} <u>${c.lost}</u>` : ''} · ${TX.goal.gate} <b>${steps < 65535 ? Math.round(steps / 5) * 5 : '?'}</b>`, Math.hypot(sx, sy) > 0.2 ? Math.atan2(sx, sy) : null);
-    }
+    // сквозняк тянет к Вратам: пыль идёт туда струями, пламя клонится туда же — стрелок на экране нет
+    const dl = Math.hypot(this.drift.dx, this.drift.dz);
+    this.drift.x += this.drift.dx * T.draft.speed * dt; this.drift.z += this.drift.dz * T.draft.speed * dt;
+    this.dust.update(t, this.lampWorld, this.radius, power, (S.mobile ? 2.2 : 2.4 * S.renderer.getPixelRatio()) * T.draft.size, this.drift.x, this.drift.z,
+      this.drift.dx * S.right.x + this.drift.dz * S.right.z, (this.drift.dx * S.up.x + this.drift.dz * S.up.z) * 0.7, dl);
+    this.draft.update(t, dt, this.lampWorld.x, this.lampWorld.z, lamp.held && lamp.lit ? this.radius : 0, power, this.wind.phase === 'idle' ? 0 : 1);
     hud.updateMarkers((x, z) => { _v.set(x, 1, z).project(S.camera); return [(_v.x * 0.5 + 0.5) * innerWidth, (1 - (_v.y * 0.5 + 0.5)) * innerHeight]; });
-    hud.setOil(lamp.oil, lamp.oil <= T.lamp.lowOil);
-    hud.setHands(lamp.flasks, needsFan(lamp) ? lamp.fan : lamp.pour, needsFan(lamp), lamp.shield > 0.5, this.wind.phase !== 'idle');
+    hud.setHands(lamp.fan, needsFan(lamp), lamp.shield > 0.5, this.wind.phase !== 'idle', this.carrying);
     // видно, кто говорит: у говорящего двигаются голова и руки
     const bk = this.story.barker;
     const sp = talking ? this.story.speakerOf(hud.speakerName) : bk && performance.now() < bk.until ? bk.h : null;

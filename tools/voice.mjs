@@ -62,7 +62,7 @@ add('efim', ef.talk, '[frightened old man, hoarse whisper]');
 add('efim', ef.accepted, '[relieved, shaky]');
 add('efim', ef.refused, '[resigned, hollow]');
 add('efim', ef.poor, '[weak, gentle]');
-add('efim', [ef.barks, ef.sense].flat(), '[urgent hoarse whisper]');
+add('efim', ef.barks, '[urgent hoarse whisper]');
 add('efim', ef.gate, '[awed, voice breaking]');
 add('efim', ef.stay, '[tired, calm, final]');
 add('efim', TX.grab.efim, '[old man screaming in terror]');
